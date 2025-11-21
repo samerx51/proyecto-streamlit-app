@@ -1,0 +1,24 @@
+﻿_id,DELITOS SEGUN AGRUPACION POR MODERNIZACION,REGION AYSEN DEL GRAL CARLOS IBANEZ DEL CAMPO,REGION DE ANTOFAGASTA,REGION DE ARICA Y PARINACOTA,REGION DE ATACAMA,REGION DE COQUIMBO,REGION DE LA ARAUCANIA,REGION DE LOS LAGOS,REGION DE LOS RIOS,REGION DE MAGALLANES Y LA ANTARTICA CHILENA,REGION DE NUBLE,REGION DE TARAPACA,REGION DE VALPARAISO,REGION DEL BIO BIO,REGION DEL LIBERTADOR GRAL. BERNARDO O'HIGGINS,REGION DEL MAULE,REGION METROPOLITANA DE SANTIAGO,Total general
+1,Amenazas con armas.,0,1,0,0,2,0,0,0,0,1,0,1,3,1,1,4,14
+2,Amenazas y riñas.,13,68,62,57,75,88,41,21,28,62,58,150,77,82,65,488,1435
+3,Consumo de alcohol y de drogas en la vía pública.,0,2,0,3,2,2,0,0,0,0,1,9,5,3,11,11,49
+4,Crímenes y simples delitos contenidos en la ley Nº 17.798,0,12,10,14,19,21,13,23,1,6,22,45,24,24,40,174,448
+5,Crímenes y simples delitos contenidos en la ley Nº 20.000,39,148,203,149,188,288,116,124,63,119,308,524,436,255,445,1805,5210
+6,Daños,6,6,10,11,21,20,6,6,16,5,7,19,20,7,16,72,248
+7,Delitos en contexto de violencia intrafamiliar,2,19,4,13,10,18,18,9,5,8,15,26,19,10,21,139,336
+8,Homicidios y femicidios,5,21,20,23,35,21,18,9,6,13,18,52,63,28,42,300,674
+9,Hurtos.,5,58,33,19,36,47,23,22,11,27,24,83,52,16,42,361,859
+10,Incivilidad,9,17,29,19,18,14,4,6,3,1,1,18,14,8,11,84,256
+11,Lesiones graves,5,9,9,11,12,8,13,5,13,8,22,12,17,7,12,49,212
+12,Lesiones leves.,16,75,69,25,46,36,29,31,31,23,82,76,69,62,45,380,1095
+13,Lesiones menos graves.,13,47,31,42,55,39,26,24,15,37,55,81,45,37,41,279,867
+14,Otros desórdenes públicos.,0,0,1,0,0,0,1,1,0,0,0,1,2,0,0,4,10
+15,Otros robos con fuerza.,0,13,7,4,8,24,14,32,1,4,3,12,18,4,7,62,213
+16,Receptación.,14,80,54,39,66,89,33,27,15,33,43,101,116,48,72,515,1345
+17,Robos con violencia e intimidación,8,18,25,23,26,24,14,22,7,15,22,77,39,40,65,341,766
+18,Robos de vehículos y sus accesorios.,0,1,4,0,0,5,0,0,0,3,4,2,2,0,1,5,27
+19,Robos en lugares habitados y no habitados,3,16,10,13,18,22,20,9,12,20,10,45,31,26,27,171,453
+20,Robos por sorpresa.,1,4,6,1,4,6,3,3,2,6,3,18,1,0,3,69,130
+21,Violaciones y delitos sexuales,13,51,34,19,27,56,46,30,31,34,32,86,42,50,48,276,875
+22,Total general,152,666,621,485,668,828,438,404,260,425,730,1438,1095,708,1015,5589,15522
+23,FUENTE: Base Relacional para Análisis e Información (BRAIN) (datos comprende información desde el 01/01/2025 al 30/09/2025).,,,,,,,,,,,,,,,,,

@@ -1,0 +1,26 @@
+﻿_id,DELITOS SEGUN AGRUPACION POR MODERNIZACION,REGION AYSEN DEL GRAL CARLOS IBANEZ DEL CAMPO,REGION DE ANTOFAGASTA,REGION DE ARICA Y PARINACOTA,REGION DE ATACAMA,REGION DE COQUIMBO,REGION DE LA ARAUCANIA,REGION DE LOS LAGOS,REGION DE LOS RIOS,REGION DE MAGALLANES Y LA ANTARTICA CHILENA,REGION DE NUBLE,REGION DE TARAPACA,REGION DE VALPARAISO,REGION DEL BIO BIO,REGION DEL LIBERTADOR GRAL. BERNARDO O'HIGGINS,REGION DEL MAULE,REGION METROPOLITANA DE SANTIAGO,Total general
+1,Amenazas con armas.,6,5,2,0,5,8,7,6,4,11,3,34,9,14,9,75,198
+2,Amenazas y riñas.,136,940,557,388,533,1457,1112,473,323,619,398,2777,1940,872,1261,6436,20222
+3,Consumo de alcohol y de drogas en la vía pública.,0,0,0,3,0,0,0,0,0,1,2,4,3,1,6,1,21
+4,Crímenes y simples delitos contenidos en la ley Nº 17.798,2,1,2,3,13,22,4,5,1,9,6,18,42,8,34,59,229
+5,Crímenes y simples delitos contenidos en la ley Nº 20.000,3,9,5,13,20,42,22,25,17,71,5,44,45,37,132,130,620
+6,Daños,38,102,43,64,94,393,184,157,67,115,37,436,349,133,176,920,3308
+7,Delitos en contexto de violencia intrafamiliar,120,550,166,218,138,449,1122,316,144,714,324,974,890,337,1003,4199,11664
+8,Homicidios y femicidios*,4,24,17,16,20,16,27,10,4,5,13,61,68,28,36,250,599
+9,Hurtos.,159,317,179,243,427,1042,440,374,213,233,186,1242,986,509,823,2765,10138
+10,Incivilidad,27,66,44,81,57,236,127,105,49,109,41,263,232,121,172,548,2278
+11,Lesiones graves,21,170,78,102,134,197,207,71,57,287,84,311,623,191,374,1177,4084
+12,Lesiones leves.,51,253,95,88,139,405,195,134,84,90,63,738,507,163,257,1979,5241
+13,Lesiones menos graves.,22,123,50,68,94,372,262,86,66,163,112,781,385,198,665,1390,4837
+14,Otros desórdenes públicos.,0,0,0,0,0,1,0,0,0,0,0,3,2,1,0,2,9
+15,Otros robos con fuerza.,21,112,45,130,132,305,122,191,18,160,38,374,357,292,1571,1141,5009
+16,Receptación.,18,27,32,21,82,95,27,17,14,29,10,126,102,31,92,391,1114
+17,Robos con violencia e intimidación,40,485,224,345,304,446,139,185,39,426,181,1213,1028,936,1462,6708,14161
+18,Robos de vehículos y sus accesorios.,2,61,43,32,58,107,20,39,4,26,45,256,248,118,466,963,2488
+19,Robos en lugares habitados y no habitados,139,513,198,327,423,992,397,565,147,617,130,1213,1523,1027,4207,2956,15374
+20,Robos por sorpresa.,7,78,39,28,80,75,37,74,6,40,39,268,121,129,513,1471,3005
+21,Violaciones y delitos sexuales,355,559,1008,511,917,2127,2132,609,556,2323,830,2692,3254,1677,2596,6303,28449
+22,Total general,1171,4395,2827,2681,3670,8787,6583,3442,1813,6048,2547,13828,12714,6823,15855,39864,133048
+23,"FUENTES: Base Relacional para Análisis e Información (BRAIN) (datos comprende información desde el 01/01/2025 al 30/09/2025). Respecto de los datos de víctimas del delito de “homicidio”,",,,,,,,,,,,,,,,,,
+24,"se utilizó la Base de Datos de la Plana Mayor de la Jefatura Nacional de Delitos Contra las Personas, que contiene información preliminar obtenida de las Fichas informativas por concurrencias a sitios",,,,,,,,,,,,,,,,,
+25,"del suceso de la especialidad y por detenciones de imputados, esclarecimiento de dichos delitos y autores identificados, diligenciadas por las Brigadas de Homicidios a nivel nacional.",,,,,,,,,,,,,,,,,
