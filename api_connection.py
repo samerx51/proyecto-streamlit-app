@@ -4,27 +4,33 @@ import pandas as pd
 API_URL = "https://datos.gob.cl/api/3/action/datastore_search"
 RESOURCE_ID = "18b1d53d-7e52-4a1e-bf8e-55b206389757"
 
-def get_police_data(limit=5000):
-    """
-    Obtiene datos policiales desde la API oficial de datos.gob.cl
-    Retorna un DataFrame de pandas.
-    """
+def get_data(limit=5000):
     params = {
         "resource_id": RESOURCE_ID,
-        "limit": limit
+        "limit": limit  # traer hasta 5000 filas
     }
 
     response = requests.get(API_URL, params=params)
 
-    # Manejo de errores
+    # validar que la API respondió bien
     if response.status_code != 200:
-        raise Exception(f"Error en la solicitud: {response.status_code}")
+        raise Exception(f"Error en petición: {response.status_code}")
 
     data = response.json()
 
-    if not data.get("success"):
-        raise Exception("Error en respuesta del servidor")
+    # validar que CKAN entregó datos
+    if not data.get("success", False):
+        raise Exception("La API no devolvió datos exitosamente")
 
     records = data["result"]["records"]
-    return pd.DataFrame(records)
+
+    # convertir a dataframe
+    df = pd.DataFrame(records)
+
+    return df
+
+if __name__ == "__main__":
+    df = get_data()
+    print(df.head())
+
 
