@@ -10,7 +10,7 @@ año = st.sidebar.selectbox("Selecciona año", df["anio"].unique())
 region = st.sidebar.multiselect("Región", df["region"].unique())
 
 df_filtrado = df[
-    (df["anio"] == año) &
+    (df["año"] == año) &
     (df["region"].isin(region) if region else True)
 ]
 
