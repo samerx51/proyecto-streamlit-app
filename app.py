@@ -5,5 +5,17 @@ st.title("Análisis Estadísticas Policiales - Chile")
 
 df = get_data()
 
-st.write("Datos obtenidos desde la API:")
-st.dataframe(df)
+st.sidebar.header("Filtros")
+año = st.sidebar.selectbox("Selecciona año", df["anio"].unique())
+region = st.sidebar.multiselect("Región", df["region"].unique())
+
+df_filtrado = df[
+    (df["anio"] == año) &
+    (df["region"].isin(region) if region else True)
+]
+
+st.subheader("Datos filtrados")
+st.dataframe(df_filtrado)
+
+st.subheader("Casos por tipo de delito")
+st.bar_chart(df_filtrado.groupby("delito")["casos"].sum())
