@@ -4,7 +4,7 @@ import pandas as pd
 API_URL = "https://datos.gob.cl/api/3/action/datastore_search"
 RESOURCE_ID = "18b1d53d-7e52-4a1e-bf8e-55b206389757"
 
-def fetch_from_api_to_df(limit=5000):
+def get_data(limit=5000):
     params = {
         "resource_id": RESOURCE_ID,
         "limit": limit
@@ -21,9 +21,6 @@ def fetch_from_api_to_df(limit=5000):
         raise Exception("La API no devolvió datos exitosamente")
 
     records = data["result"]["records"]
-
     df = pd.DataFrame(records)
 
     return df
-
-
