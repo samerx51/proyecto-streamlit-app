@@ -1,16 +1,9 @@
-import streamlit as st
 from api_connection import get_data
+import streamlit as st
 
-st.title("Estadísticas Policiales en Chile - PDI ✅")
+st.title("Análisis Estadísticas Policiales - Chile")
 
-st.write("Datos obtenidos desde datos.gob.cl usando API CKAN")
+df = get_data()
 
-try:
-    df = get_data()
-    st.success("✅ Datos cargados correctamente desde la API")
-
-    st.write("### Vista previa de los datos")
-    st.dataframe(df)
-
-except Exception as e:
-    st.error(f"Error al obtener datos: {e}")
+st.write("Datos obtenidos desde la API:")
+st.dataframe(df)
