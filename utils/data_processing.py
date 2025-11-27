@@ -59,4 +59,44 @@ def basic_clean(df: pd.DataFrame, date_cols: list = [], numeric_cols: list = [])
     if numeric_cols:
         df = coerce_numeric(df, numeric_cols)
     return df
+def resumen_general(df: pd.DataFrame) -> pd.DataFrame:
+    """Entrega conteo, promedio, mínimo, máximo y desviación estándar."""
+    return df.describe(include="all").transpose()
+
+
+def delitos_mas_frecuentes(df: pd.DataFrame, col_delito: str, col_total: str, n: int = 10):
+    """Devuelve los delitos más reportados."""
+    if col_delito not in df.columns or col_total not in df.columns:
+        return pd.DataFrame()
+    return (
+        df.groupby(col_delito)[col_total]
+        .sum()
+        .sort_values(ascending=False)
+        .head(n)
+        .reset_index()
+    )
+
+
+def ranking_por_region(df: pd.DataFrame, col_region: str, col_total: str):
+    """Ordena regiones según cantidad de delitos."""
+    if col_region not in df.columns or col_total not in df.columns:
+        return pd.DataFrame()
+    return (
+        df.groupby(col_region)[col_total]
+        .sum()
+        .sort_values(ascending=False)
+        .reset_index()
+    )
+
+
+def evolucion_anual(df: pd.DataFrame, col_anio: str, col_total: str):
+    """Crea serie temporal anual."""
+    if col_anio not in df.columns or col_total not in df.columns:
+        return pd.DataFrame()
+    return (
+        df.groupby(col_anio)[col_total]
+        .sum()
+        .sort_values()
+        .reset_index()
+    )
 
