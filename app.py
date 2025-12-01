@@ -141,6 +141,18 @@ st.write(df.dtypes)
 st.subheader("Valores faltantes por columna")
 st.write(df.isna().sum())
 
+# --- Tratamiento de valores faltantes ---
+st.subheader("🔧 Tratamiento de valores faltantes")
+
+st.write("Antes del tratamiento:")
+st.write(df.isna().sum())
+
+# Rellenar NA con 0
+df = df.fillna(0)
+
+st.write("Después del tratamiento:")
+st.write(df.isna().sum())
+
 # ----------------------------
 # BUSCADOR Y FILTROS
 # ----------------------------
