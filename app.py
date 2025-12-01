@@ -1,4 +1,3 @@
-# app.py - Versión mejorada enfocada en gráficos interactivos y filtros
 import streamlit as st
 import pandas as pd
 import requests
@@ -8,11 +7,8 @@ from typing import Dict, Any
 import plotly.express as px
 
 st.set_page_config(page_title="Estadísticas Policiales Chile", layout="wide")
-st.title("📊 Estadísticas Policiales en Chile — PDI & datos.gob.cl")
+st.title("Estadísticas Policiales en Chile — PDI & datos.gob.cl")
 
-# ----------------------------
-# CONFIG: APIs - reemplaza/añade si necesitas
-# ----------------------------
 API_DATASETS: Dict[str, str] = {
     "Victimas": "https://datos.gob.cl/api/3/action/datastore_search?resource_id=285a2c22-9301-4456-9e18-9fd8dbb1c6f2",
     "Controles de identidad": "https://datos.gob.cl/api/3/action/datastore_search?resource_id=69b8c48b-1d64-4296-8275-f3d2abfe1f0e",
@@ -23,9 +19,6 @@ API_DATASETS: Dict[str, str] = {
 
 DATA_FOLDER = "data"
 
-# ----------------------------
-# UTIL: funciones de carga
-# ----------------------------
 @st.cache_data(show_spinner=False)
 def fetch_api_all_records(base_url: str, page_limit: int = 1000) -> pd.DataFrame:
     """Descarga todos los registros de una API tipo CKAN/datastore_search con paginación."""
