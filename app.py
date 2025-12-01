@@ -1,111 +1,144 @@
 import streamlit as st
 import pandas as pd
-import requests
-import os
+import plotly.express as px
 
-st.set_page_config(page_title="Estadísticas PDI", layout="wide")
-st.title("📊 Plataforma Interactiva — Estadísticas Policiales en Chile")
+# -----------------------------------------------------------
+# Cargar Datos
+# -----------------------------------------------------------
 
-# ================================
-# 🔧 CONFIGURACIÓN
-# ================================
-API_DATASETS = {
-    "Delitos y faltas investigadas": "https://datos.gob.cl/api/3/action/datastore_search?resource_id=b9bdcf46-f717-4dd0-8022-52e2ce3f4080",
-    "Denuncias": "https://datos.gob.cl/api/3/action/datastore_search?resource_id=c4675051-558b-42d7-ad15-87f4bb6ee458",
-}
-
-DATA_FOLDER = "data"
-
-# ================================
-# 🔧 FUNCIONES
-# ================================
 @st.cache_data
-def fetch_api(url: str, page_limit: int = 1000):
-    records = []
-    offset = 0
-    while True:
-        resp = requests.get(url, params={"limit": page_limit, "offset": offset}, timeout=20)
-        data = resp.json()
-        batch = data.get("result", {}).get("records", [])
-        if not batch:
-            break
-        records.extend(batch)
-        offset += len(batch)
-        if len(batch) < page_limit:
-            break
-    return pd.DataFrame(records)
+def cargar_datos():
+    ruta = "estadisticas_pdi.csv"  # <-- Ajusta el nombre si tu archivo se llama distinto
+    df = pd.read_csv(ruta)
+    return df
 
-def listar_csvs(folder="data"):
-    if not os.path.exists(folder):
-        return []
-    return [f for f in os.listdir(folder) if f.lower().endswith(".csv")]
+df = cargar_datos()
 
-def normalizar(df):
-    df.columns = (
-        df.columns
-        .str.lower()
-        .str.replace(" ", "_")
-        .str.replace("á", "a")
-        .str.replace("é", "e")
-        .str.replace("í", "i")
-        .str.replace("ó", "o")
-        .str.replace("ú", "u")
-        .str.replace("ñ", "n")
+# -----------------------------------------------------------
+# Configuración de la página
+# -----------------------------------------------------------
+
+st.set_page_config(
+    page_title="Estadísticas Policiales PDI",
+    page_icon="🛡️",
+    layout="wide"
+)
+
+st.title("🛡️ Dashboard de Estadísticas Policiales – PDI")
+st.write("Análisis interactivo basado en datos reales de la Policía de Investigaciones de Chile.")
+
+# -----------------------------------------------------------
+# Sidebar – Filtros
+# -----------------------------------------------------------
+
+st.sidebar.header("🔍 Filtros")
+
+# Filtrar por región si existe la columna
+if "REGIÓN" in df.columns:
+    regiones = st.sidebar.multiselect(
+        "Seleccionar Región",
+        sorted(df["REGIÓN"].dropna().unique()),
+        default=None
     )
-    return df
+    if regiones:
+        df = df[df["REGIÓN"].isin(regiones)]
 
-def detectar_numericas(df):
-    """Convierte columnas numéricas que vengan como texto"""
-    for col in df.columns:
-        df[col] = pd.to_numeric(df[col], errors="ignore")
-    return df
+# Filtrar por año si existe la columna
+if "AÑO" in df.columns:
+    años = st.sidebar.multiselect(
+        "Seleccionar Año",
+        sorted(df["AÑO"].dropna().unique()),
+        default=None
+    )
+    if años:
+        df = df[df["AÑO"].isin(años)]
 
-# ================================
-# 📁 SELECCIÓN DE FUENTE
-# ================================
-st.sidebar.header("Fuente de datos")
-fuente = st.sidebar.radio("Selecciona origen:", ["API", "CSV local"])
+# -----------------------------------------------------------
+# Sección Estadísticas Generales
+# -----------------------------------------------------------
 
-df = pd.DataFrame()
+st.subheader("📊 Estadísticas Generales")
 
-if fuente == "API":
-    dataset = st.sidebar.selectbox("Dataset disponible", list(API_DATASETS.keys()))
-    if dataset:
-        with st.spinner("Descargando datos..."):
-            df = fetch_api(API_DATASETS[dataset])
+col1, col2, col3 = st.columns(3)
 
-else:
-    archivos = listar_csvs()
-    if not archivos:
-        st.sidebar.error("No hay CSV dentro de /data")
-    else:
-        archivo_sel = st.sidebar.selectbox("Selecciona CSV", archivos)
-        df = pd.read_csv(f"data/{archivo_sel}", low_memory=False)
+with col1:
+    st.metric("Total de Registros", len(df))
 
-# ================================
-# 🔍 VALIDACIÓN
-# ================================
-if df.empty:
-    st.warning("No se cargaron datos")
-    st.stop()
+# Campos comunes para sumar si existen
+campos_suma = ["DETENIDOS", "DENUNCIAS", "INCAUTACIONES"]
 
-df = normalizar(df)
-df = detectar_numericas(df)
-df = df.fillna(0)
+for campo in campos_suma:
+    if campo not in df.columns:
+        df[campo] = 0
 
-st.success("Datos cargados correctamente ✔")
+with col2:
+    st.metric("Total de Detenidos", int(df["DETENIDOS"].sum()))
 
-# ================================
-# 👀 EXPLORACIÓN SIMPLE
-# ================================
-st.subheader("👀 Vista rápida del dataset")
-st.dataframe(df.head(20), use_container_width=True)
+with col3:
+    st.metric("Total de Denuncias", int(df["DENUNCIAS"].sum()))
 
-# ================================
-# 🏆 RANKING CATEGÓRICO
-# ================================
-st.header("🏆 Ranking — Categorías más frecuentes")
+# -----------------------------------------------------------
+# Gráfico 1: Denuncias por Región
+# -----------------------------------------------------------
 
-# Buscar columnas categóricas útiles
+if "REGIÓN" in df.columns and "DENUNCIAS" in df.columns:
+    st.subheader("📍 Denuncias por Región")
+    graf1 = px.bar(
+        df.groupby("REGIÓN")["DENUNCIAS"].sum().reset_index(),
+        x="REGIÓN",
+        y="DENUNCIAS",
+        title="Denuncias Totales por Región"
+    )
+    st.plotly_chart(graf1, use_container_width=True)
+
+# -----------------------------------------------------------
+# Gráfico 2: Evolución de Detenidos por Año
+# -----------------------------------------------------------
+
+if "AÑO" in df.columns and "DETENIDOS" in df.columns:
+    st.subheader("📈 Evolución de Detenidos por Año")
+    graf2 = px.line(
+        df.groupby("AÑO")["DETENIDOS"].sum().reset_index(),
+        x="AÑO",
+        y="DETENIDOS",
+        markers=True,
+        title="Detenidos Totales por Año"
+    )
+    st.plotly_chart(graf2, use_container_width=True)
+
+# -----------------------------------------------------------
+# Tabla Explorable
+# -----------------------------------------------------------
+
+st.subheader("📄 Tabla de Datos")
+st.dataframe(df, use_container_width=True)
+
+# -----------------------------------------------------------
+# Análisis Automático: Columnas Numéricas y Categóricas
+# -----------------------------------------------------------
+
+st.subheader("📌 Análisis Automático de Columnas")
+
+numericas = df.select_dtypes(include=["int64", "float64"]).columns.tolist()
+
 categoricas = [
-    c for c in df.colum
+    col for col in df.columns
+    if df[col].dtype == "object" and df[col].nunique() <= 50
+]  # <-- AQUÍ estaba el error | AHORA CERRADO COMPLETAMENTE ✔✔✔
+
+st.write("### Columnas Numéricas")
+st.write(numericas)
+
+st.write("### Columnas Categóricas")
+st.write(categoricas)
+
+# -----------------------------------------------------------
+# Selector de Análisis
+# -----------------------------------------------------------
+
+st.subheader("📊 Análisis Personalizado")
+
+col_x = st.selectbox("Seleccionar variable X", df.columns)
+col_y = st.selectbox("Seleccionar variable Y", df.columns)
+
+if st.button("Generar Gráfico"):
