@@ -147,6 +147,21 @@ st.write(df.isna().sum())
 st.header("🔎 Buscador y filtros")
 
 cols = list(df.columns)
+# --- 3.3 Exploración inicial del dataset ---
+st.header("📊 Exploración inicial del dataset")
+
+st.subheader("Primeras filas del dataset")
+st.write(df.head())
+
+st.subheader("Estadísticas generales")
+st.write(df.describe(include="all"))
+
+st.subheader("Tipos de datos")
+st.write(df.dtypes)
+
+st.subheader("Valores faltantes por columna")
+st.write(df.isna().sum())
+
 # columna para búsqueda de texto
 col_buscar = st.selectbox("Columna para buscar (texto)", cols, index=0)
 texto = st.text_input("Texto a buscar (filtra en la columna seleccionada)")
