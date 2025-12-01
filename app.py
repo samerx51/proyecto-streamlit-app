@@ -311,4 +311,4 @@ st.info(
     "- Si al conectar la API ves columnas como 'enero','febrero', etc., eso significa que el dataset está en formato ancho (meses como columnas). "
     "Si quieres ver los tipos de delitos por fila (formato largo), puedo agregar una transformación (melt/pivot) para normalizar. "
 )
-st.caption("Si quieres que convierta columnas por mes a formato largo (tipo_delito, mes, valor), 
+st.caption("Si quieres que convierta columnas por mes a formato largo (tipo_delito, mes, valor), escribe: 'pivot meses' y lo agrego.")
