@@ -3,14 +3,17 @@ import pandas as pd
 import requests
 import os
 from io import BytesIO
-from typing import Dict, Any
+from typing import Dict
 
+# --------------------------------------
+# CONFIGURACIÓN GENERAL
+# --------------------------------------
 st.set_page_config(page_title="Estadísticas Policiales Chile", layout="wide")
-st.title("📊 Estadísticas Policiales en Chile — PDI & datos.gob.cl")
+st.title("📊 Panel Interactivo — Estadísticas Policiales en Chile")
 
-# ----------------------------
-# CONFIG: APIs - reemplaza/añade si necesitas
-# ----------------------------
+# --------------------------------------
+# CONFIG: APIs disponibles
+# --------------------------------------
 API_DATASETS: Dict[str, str] = {
     "Victimas": "https://datos.gob.cl/api/3/action/datastore_search?resource_id=285a2c22-9301-4456-9e18-9fd8dbb1c6f2",
     "Controles de identidad": "https://datos.gob.cl/api/3/action/datastore_search?resource_id=69b8c48b-1d64-4296-8275-f3d2abfe1f0e",
@@ -21,294 +24,180 @@ API_DATASETS: Dict[str, str] = {
 
 DATA_FOLDER = "data"
 
-# ----------------------------
-# UTIL: funciones de carga
-# ----------------------------
+# --------------------------------------
+# FUNCIONES DE CARGA
+# --------------------------------------
 @st.cache_data(show_spinner=False)
-def fetch_api_all_records(base_url: str, page_limit: int = 1000) -> pd.DataFrame:
-    """
-    Descarga todos los registros de una API tipo CKAN/datastore_search
-    usando paginación con 'limit' y 'offset'.
-    """
-    records = []
+def fetch_api(url: str, limit: int = 1000) -> pd.DataFrame:
+    """Descarga todos los registros desde la API con paginación."""
+    registros = []
     offset = 0
-    params = {"limit": page_limit, "offset": offset}
+
     try:
-        # extraer resource_id si la URL ya lo trae; base_url puede contener params
         while True:
-            params["offset"] = offset
-            resp = requests.get(base_url, params=params, timeout=20)
-            resp.raise_for_status()
-            data = resp.json()
-            batch = data.get("result", {}).get("records", [])
-            if not batch:
+            params = {"limit": limit, "offset": offset}
+            resp = requests.get(url, params=params)
+            data = resp.json()["result"]["records"]
+
+            if not data:
                 break
-            records.extend(batch)
-            offset += len(batch)
-            # seguridad: si el batch es menor que page_limit, terminamos
-            if len(batch) < page_limit:
+
+            registros.extend(data)
+            offset += len(data)
+
+            if len(data) < limit:
                 break
-        df = pd.DataFrame(records)
-        return df
-    except Exception as e:
-        # devolvemos DataFrame vacío en caso de fallo (la app mostrará la advertencia)
-        st.error(f"Error descargando datos desde la API: {e}")
+
+        return pd.DataFrame(registros)
+
+    except:
         return pd.DataFrame()
 
-@st.cache_data
 def load_csv_local(path: str) -> pd.DataFrame:
-    # intenta utf-8, si falla intenta latin-1
     try:
         return pd.read_csv(path, encoding="utf-8", low_memory=False)
-    except Exception:
+    except:
         return pd.read_csv(path, encoding="latin-1", low_memory=False)
 
-def listar_csvs(folder: str = DATA_FOLDER):
-    if not os.path.exists(folder):
+def list_csvs():
+    if not os.path.exists(DATA_FOLDER):
         return []
-    return sorted([f for f in os.listdir(folder) if f.lower().endswith(".csv")])
+    return [f for f in os.listdir(DATA_FOLDER) if f.endswith(".csv")]
 
-def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
+def normalize_cols(df: pd.DataFrame):
     df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
     return df
 
-def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
+def df_to_csv(df):
     buf = BytesIO()
     df.to_csv(buf, index=False)
-    buf.seek(0)
     return buf.getvalue()
 
-# ----------------------------
-# BARRA LATERAL: escoger fuente
-# ----------------------------
-st.sidebar.header("📁 Fuente de datos")
-fuente = st.sidebar.radio("Origen de datos:", ("API (datos.gob.cl)", "CSV local (carpeta /data)"))
+# --------------------------------------
+# SIDEBAR: Selección de datos
+# --------------------------------------
+st.sidebar.header("📁 Selección de datos")
+
+source = st.sidebar.radio("Fuente:", ["API (datos.gob.cl)", "CSV local"])
 
 df = pd.DataFrame()
 dataset_name = None
 
-if fuente == "API (datos.gob.cl)":
-    st.sidebar.info("Selecciona el dataset de datos.gob.cl (cuando selecciones, se descargan los registros).")
-    dataset_name = st.sidebar.selectbox("Dataset (API)", list(API_DATASETS.keys()))
+if source == "API (datos.gob.cl)":
+    dataset_name = st.sidebar.selectbox("Dataset disponible", list(API_DATASETS.keys()))
     if dataset_name:
         url = API_DATASETS[dataset_name]
-        with st.spinner(f"Descargando datos desde API: {dataset_name} ..."):
-            df = fetch_api_all_records(url, page_limit=1000)
+        with st.spinner("Descargando datos desde API..."):
+            df = fetch_api(url)
 
 else:
-    st.sidebar.info("Selecciona un CSV que hayas subido a la carpeta /data/")
-    archivos = listar_csvs()
-    if not archivos:
-        st.sidebar.warning("No hay archivos CSV en /data/. Súbelos a GitHub y espera a que el deploy se actualice.")
+    archivos = list_csvs()
+    if archivos:
+        dataset_name = st.sidebar.selectbox("Archivo CSV", archivos)
+        df = load_csv_local(os.path.join(DATA_FOLDER, dataset_name))
     else:
-        archivo_sel = st.sidebar.selectbox("CSV local", archivos)
-        if archivo_sel:
-            ruta = os.path.join(DATA_FOLDER, archivo_sel)
-            df = load_csv_local(ruta)
-            dataset_name = archivo_sel
+        st.sidebar.warning("No hay archivos CSV en /data.")
 
-# ----------------------------
-# Validación y normalización
-# ----------------------------
-if df is None or (isinstance(df, pd.DataFrame) and df.empty):
-    st.warning("No se cargaron datos desde la fuente seleccionada. Revisa la barra lateral.")
+if df.empty:
+    st.warning("No se pudieron cargar datos.")
     st.stop()
 
-df = normalizar_columnas(df)
-
-# ----------------------------
-# EXPLORACIÓN INICIAL (esto te permite ver exactamente las columnas)
-# ----------------------------
-st.header("📌 Exploración inicial de los datos")
-st.subheader("Primeras filas")
-st.write(df.head(10))
-
-st.subheader("Nombres de columnas")
-st.write(list(df.columns))
-
-st.subheader("Información del dataset (describe)")
-# mostramos describe solo si hay columnas numéricas o mixtas
-with st.expander("Ver resumen estadístico (describe)"):
-    try:
-        st.write(df.describe(include="all").T)
-    except Exception as e:
-        st.write("No se pudo generar describe:", e)
-
-st.subheader("Tipos de datos por columna")
-st.write(df.dtypes)
-
-st.subheader("Valores faltantes por columna")
-st.write(df.isna().sum())
-
-# --- Tratamiento de valores faltantes ---
-st.subheader("🔧 Tratamiento de valores faltantes")
-
-st.write("Antes del tratamiento:")
-st.write(df.isna().sum())
-
-# Rellenar NA con 0
+df = normalize_cols(df)
 df = df.fillna(0)
 
-st.write("Después del tratamiento:")
-st.write(df.isna().sum())
+# --------------------------------------
+# DASHBOARD PRINCIPAL
+# --------------------------------------
+st.header("📌 Vista rápida del dataset")
+st.dataframe(df.head(20))
 
-# ---------------------------------------------
-# 🔧 Limpieza de datos
-# ---------------------------------------------
-st.header("🧹 Limpieza de Datos")
-
-st.subheader("Rellenando valores faltantes con 0...")
-df = df.fillna(0)
-st.write("✔ Valores faltantes rellenados con 0")
-
-# Identificar columnas numéricas que están como 'object'
-cols_object = df.select_dtypes(include=['object']).columns
-
-# Intentar convertirlas a numérico cuando sea posible
-for col in cols_object:
-    df[col] = pd.to_numeric(df[col], errors='ignore')
-
-st.subheader("Tipos de datos después de la limpieza")
-st.write(df.dtypes)
-
-st.subheader("Verificación de valores faltantes (debe dar todo 0)")
-st.write(df.isna().sum())
-
-# ----------------------------
-# BUSCADOR Y FILTROS
-# ----------------------------
-st.header("🔎 Buscador y filtros")
-
-cols = list(df.columns)
-# --- 3.3 Exploración inicial del dataset ---
-st.header("📊 Exploración inicial del dataset")
-
-st.subheader("Primeras filas del dataset")
-st.write(df.head())
-
-st.subheader("Estadísticas generales")
-st.write(df.describe(include="all"))
-
-st.subheader("Tipos de datos")
-st.write(df.dtypes)
-
-st.subheader("Valores faltantes por columna")
-st.write(df.isna().sum())
-
-# columna para búsqueda de texto
-col_buscar = st.selectbox("Columna para buscar (texto)", cols, index=0)
-texto = st.text_input("Texto a buscar (filtra en la columna seleccionada)")
-
-df_filtrado = df.copy()
-if texto:
-    df_filtrado = df_filtrado[df_filtrado[col_buscar].astype(str).str.contains(texto, case=False, na=False)]
-
-# filtrado por año si existe columna 'año' o 'anio' o 'year'
-anio_cols = [c for c in cols if "año" in c or "anio" in c or "year" in c]
-if anio_cols:
-    c_anio = anio_cols[0]
-    años = sorted(df[c_anio].dropna().unique())
-    if len(años) > 0:
-        año_sel = st.sidebar.selectbox("Filtrar por año", ["Todos"] + [str(x) for x in años])
-        if año_sel != "Todos":
-            df_filtrado = df_filtrado[df_filtrado[c_anio].astype(str) == año_sel]
-
-st.write(f"Resultados (filtrados): {len(df_filtrado)}")
-st.dataframe(df_filtrado.head(200))
-
-# ----------------------------
-# GRÁFICOS AUTOMÁTICOS Y ANÁLISIS
-# ----------------------------
-st.header("📊 Visualizaciones rápidas")
-
-# si existen columnas numéricas, permitir graficar
-num_cols = df_filtrado.select_dtypes(include="number").columns.tolist()
-if num_cols:
-    col_graf = st.selectbox("Columna numérica para graficar", num_cols)
-    tipo_graf = st.selectbox("Tipo de gráfico", ["Línea", "Barras"])
-    if tipo_graf == "Línea":
-        st.line_chart(df_filtrado[col_graf])
-    else:
-        st.bar_chart(df_filtrado[col_graf])
-else:
-    st.info("No se detectaron columnas numéricas para graficar. Si tus datos vienen en columnas por mes (enero,febrero,...), puedes pivotearlos — dime si quieres que agregue esa transformación.")
-    
-# ---------------------------------------------
-# 📊 PASO 4.1 — Análisis general del dataset
-# ---------------------------------------------
-st.header("📈 Análisis General del Dataset")
-
-# Identificar columnas numéricas
+# Identificar columnas útiles
 num_cols = df.select_dtypes(include="number").columns.tolist()
-
-# Identificar columnas de texto relevantes
 text_cols = df.select_dtypes(include="object").columns.tolist()
 
-# =====================
-# 1️⃣ Totales por columnas numéricas
-# =====================
-st.subheader("🔹 Totales por columna numérica")
+# --------------------------------------
+# FILTROS
+# --------------------------------------
+st.subheader("🔎 Filtros")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    col_text = st.selectbox("Columna para búsqueda", text_cols)
+    text_filter = st.text_input("Buscar texto")
+
+with col2:
+    year_cols = [c for c in df.columns if "año" in c or "anio" in c or "year" in c]
+    selected_year = None
+    if year_cols:
+        ycol = year_cols[0]
+        years = sorted(df[ycol].unique())
+        selected_year = st.selectbox("Filtrar por año", ["Todos"] + list(years))
+
+df_filtered = df.copy()
+
+if text_filter:
+    df_filtered = df_filtered[df_filtered[col_text].astype(str).str.contains(text_filter, case=False)]
+
+if selected_year and selected_year != "Todos":
+    df_filtered = df_filtered[df_filtered[ycol] == selected_year]
+
+st.write(f"Resultados: {len(df_filtered)} filas")
+st.dataframe(df_filtered.head(50))
+
+# --------------------------------------
+# SECCIÓN DE GRÁFICOS INTERACTIVOS
+# --------------------------------------
+st.header("📊 Gráficos interactivos")
+
 if num_cols:
-    totales = df[num_cols].sum().sort_values(ascending=False)
-    st.write(totales)
+    graf_col = st.selectbox("Selecciona columna numérica", num_cols)
+    tipo_graf = st.radio("Tipo de gráfico", ["Línea", "Barras"])
+
+    if tipo_graf == "Línea":
+        st.line_chart(df_filtered[graf_col])
+    else:
+        st.bar_chart(df_filtered[graf_col])
 else:
-    st.info("No hay columnas numéricas para calcular totales.")
+    st.info("No hay columnas numéricas para graficar.")
 
-# =====================
-# 2️⃣ Frecuencia de categorías (si existe columna tipo_delito, comuna, etc.)
-# =====================
-posibles_categorias = ["delito", "tipo_delito", "comuna", "region", "categoria"]
+# --------------------------------------
+# 🔥 NUEVA SECCIÓN: TOP DELITOS / TOP CATEGORÍAS
+# --------------------------------------
+st.header("🔝 Ranking — categorías más frecuentes")
 
-col_categorica = None
-for c in posibles_categorias:
+cat_cols = ["delito", "tipo_delito", "comuna", "categoria", "region"]
+col_cat = None
+
+for c in cat_cols:
     if c in df.columns:
-        col_categorica = c
+        col_cat = c
         break
 
-if col_categorica:
-    st.subheader(f"🔹 Frecuencia por '{col_categorica}'")
-    st.write(df[col_categorica].value_counts().head(20))
+if col_cat:
+    top = df[col_cat].value_counts().head(10)
+    st.subheader(f"Top categorías según '{col_cat}'")
+    st.bar_chart(top)
+else:
+    st.info("No hay columnas categóricas estándar (tipo_delito/comuna/etc).")
 
-# =====================
-# 3️⃣ Si existe columna año/anio/year → análisis anual
-# =====================
-anio_cols = [c for c in df.columns if "año" in c or "anio" in c or "year" in c]
+# --------------------------------------
+# 🔥 NUEVA SECCIÓN: TENDENCIA ANUAL
+# --------------------------------------
+if year_cols:
+    st.header("📈 Tendencia anual")
+    ycol = year_cols[0]
+    df[ycol] = pd.to_numeric(df[ycol], errors="coerce").fillna(0).astype(int)
+    tendencia = df.groupby(ycol)[num_cols].sum()
+    st.line_chart(tendencia.sum(axis=1))
 
-if anio_cols:
-    col_anio = anio_cols[0]
-    st.subheader(f"🔹 Casos por año ({col_anio})")
-
-    # convertir a número si es texto
-    df[col_anio] = pd.to_numeric(df[col_anio], errors="coerce").fillna(0).astype(int)
-
-    conteo_anual = df.groupby(col_anio)[num_cols].sum()
-    st.write(conteo_anual)
-
-    st.subheader("📉 Tendencia anual (suma de todas las columnas numéricas)")
-    st.line_chart(conteo_anual.sum(axis=1))
-
-# =====================
-# 4️⃣ Identificar columna con mayor valor total
-# =====================
-if num_cols:
-    col_max = totales.idxmax()
-    st.success(f"📌 **La columna con mayor valor total es:** {col_max}")
-
-# ----------------------------
+# --------------------------------------
 # DESCARGA
-# ----------------------------
+# --------------------------------------
 st.header("⬇️ Descargar datos filtrados")
-csv_bytes = df_to_csv_bytes(df_filtrado)
-st.download_button("Descargar CSV filtrado", data=csv_bytes, file_name=f"{(dataset_name or 'dataset')}_filtrado.csv", mime="text/csv")
-
-# ----------------------------
-# AYUDA / NOTAS
-# ----------------------------
-st.markdown("---")
-st.info(
-    "Notas:\n"
-    "- Si al conectar la API ves columnas como 'enero','febrero', etc., eso significa que el dataset está en formato ancho (meses como columnas). "
-    "Si quieres ver los tipos de delitos por fila (formato largo), puedo agregar una transformación (melt/pivot) para normalizar. "
+st.download_button(
+    "Descargar CSV",
+    data=df_to_csv(df_filtered),
+    file_name=f"{dataset_name}_filtrado.csv",
+    mime="text/csv"
 )
-st.caption("Si quieres que convierta columnas por mes a formato largo (tipo_delito, mes, valor), escribe: 'pivot meses' y lo agrego.")
