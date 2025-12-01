@@ -153,6 +153,28 @@ df = df.fillna(0)
 st.write("Después del tratamiento:")
 st.write(df.isna().sum())
 
+# ---------------------------------------------
+# 🔧 Limpieza de datos
+# ---------------------------------------------
+st.header("🧹 Limpieza de Datos")
+
+st.subheader("Rellenando valores faltantes con 0...")
+df = df.fillna(0)
+st.write("✔ Valores faltantes rellenados con 0")
+
+# Identificar columnas numéricas que están como 'object'
+cols_object = df.select_dtypes(include=['object']).columns
+
+# Intentar convertirlas a numérico cuando sea posible
+for col in cols_object:
+    df[col] = pd.to_numeric(df[col], errors='ignore')
+
+st.subheader("Tipos de datos después de la limpieza")
+st.write(df.dtypes)
+
+st.subheader("Verificación de valores faltantes (debe dar todo 0)")
+st.write(df.isna().sum())
+
 # ----------------------------
 # BUSCADOR Y FILTROS
 # ----------------------------
