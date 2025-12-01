@@ -8,7 +8,7 @@ from io import BytesIO
 # CONFIG
 # ----------------------
 st.set_page_config(page_title="Estadísticas Policiales Chile", layout="wide")
-st.title("📊 Estadísticas Policiales en Chile — PDI & Seguridad Pública")
+st.title("Estadísticas Policiales en Chile — PDI & Seguridad Pública")
 
 # APIs disponibles desde datos.gob.cl
 API_DATASETS = {
@@ -49,6 +49,20 @@ def listar_csvs():
 def normalizar_columnas(df):
     df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
     return df
+st.header("📌 Exploración inicial de los datos")
+
+st.subheader("Primeras filas")
+st.write(df.head())
+
+st.subheader("Información del dataset")
+st.write(df.describe(include="all"))
+
+st.subheader("Tipos de datos por columna")
+st.write(df.dtypes)
+
+st.subheader("Valores faltantes por columna")
+st.write(df.isna().sum())
+
 
 def convertir_csv(df):
     buffer = BytesIO()
@@ -58,7 +72,7 @@ def convertir_csv(df):
 # ----------------------
 # SIDEBAR - selección de fuente
 # ----------------------
-st.sidebar.header("📁 Fuente de datos")
+st.sidebar.header("Fuente de datos")
 
 fuente = st.sidebar.radio(
     "Seleccionar origen de información:",
@@ -125,13 +139,13 @@ if columnas_anio:
     if año_sel != "Todos":
         df_filtrado = df_filtrado[df_filtrado[col_anio] == año_sel]
 
-st.write(f"✅ Resultados encontrados: {len(df_filtrado)}")
+st.write(f"Resultados encontrados: {len(df_filtrado)}")
 st.dataframe(df_filtrado)
 
 # ----------------------
 # GRÁFICO AUTOMÁTICO
 # ----------------------
-st.header("📊 Visualización")
+st.header("Visualización")
 
 num_cols = df_filtrado.select_dtypes(include="number").columns.tolist()
 
@@ -152,5 +166,5 @@ st.download_button(
     mime="text/csv"
 )
 
-st.caption("✅ Proyecto Streamlit — Seguridad Pública Chile")
+st.caption("Proyecto Streamlit — Seguridad Pública Chile")
 
