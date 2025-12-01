@@ -233,6 +233,67 @@ if num_cols:
         st.bar_chart(df_filtrado[col_graf])
 else:
     st.info("No se detectaron columnas numéricas para graficar. Si tus datos vienen en columnas por mes (enero,febrero,...), puedes pivotearlos — dime si quieres que agregue esa transformación.")
+    
+# ---------------------------------------------
+# 📊 PASO 4.1 — Análisis general del dataset
+# ---------------------------------------------
+st.header("📈 Análisis General del Dataset")
+
+# Identificar columnas numéricas
+num_cols = df.select_dtypes(include="number").columns.tolist()
+
+# Identificar columnas de texto relevantes
+text_cols = df.select_dtypes(include="object").columns.tolist()
+
+# =====================
+# 1️⃣ Totales por columnas numéricas
+# =====================
+st.subheader("🔹 Totales por columna numérica")
+if num_cols:
+    totales = df[num_cols].sum().sort_values(ascending=False)
+    st.write(totales)
+else:
+    st.info("No hay columnas numéricas para calcular totales.")
+
+# =====================
+# 2️⃣ Frecuencia de categorías (si existe columna tipo_delito, comuna, etc.)
+# =====================
+posibles_categorias = ["delito", "tipo_delito", "comuna", "region", "categoria"]
+
+col_categorica = None
+for c in posibles_categorias:
+    if c in df.columns:
+        col_categorica = c
+        break
+
+if col_categorica:
+    st.subheader(f"🔹 Frecuencia por '{col_categorica}'")
+    st.write(df[col_categorica].value_counts().head(20))
+
+# =====================
+# 3️⃣ Si existe columna año/anio/year → análisis anual
+# =====================
+anio_cols = [c for c in df.columns if "año" in c or "anio" in c or "year" in c]
+
+if anio_cols:
+    col_anio = anio_cols[0]
+    st.subheader(f"🔹 Casos por año ({col_anio})")
+
+    # convertir a número si es texto
+    df[col_anio] = pd.to_numeric(df[col_anio], errors="coerce").fillna(0).astype(int)
+
+    conteo_anual = df.groupby(col_anio)[num_cols].sum()
+    st.write(conteo_anual)
+
+    st.subheader("📉 Tendencia anual (suma de todas las columnas numéricas)")
+    st.line_chart(conteo_anual.sum(axis=1))
+
+# =====================
+# 4️⃣ Identificar columna con mayor valor total
+# =====================
+if num_cols:
+    col_max = totales.idxmax()
+    st.success(f"📌 **La columna con mayor valor total es:** {col_max}")
 
 # ----------------------------
 # DESCARGA
