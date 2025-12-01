@@ -1,9 +1,11 @@
+# app.py - Versión mejorada enfocada en gráficos interactivos y filtros
 import streamlit as st
 import pandas as pd
 import requests
 import os
 from io import BytesIO
 from typing import Dict, Any
+import plotly.express as px
 
 st.set_page_config(page_title="Estadísticas Policiales Chile", layout="wide")
 st.title("📊 Estadísticas Policiales en Chile — PDI & datos.gob.cl")
@@ -26,15 +28,11 @@ DATA_FOLDER = "data"
 # ----------------------------
 @st.cache_data(show_spinner=False)
 def fetch_api_all_records(base_url: str, page_limit: int = 1000) -> pd.DataFrame:
-    """
-    Descarga todos los registros de una API tipo CKAN/datastore_search
-    usando paginación con 'limit' y 'offset'.
-    """
+    """Descarga todos los registros de una API tipo CKAN/datastore_search con paginación."""
     records = []
     offset = 0
     params = {"limit": page_limit, "offset": offset}
     try:
-        # extraer resource_id si la URL ya lo trae; base_url puede contener params
         while True:
             params["offset"] = offset
             resp = requests.get(base_url, params=params, timeout=20)
@@ -45,19 +43,15 @@ def fetch_api_all_records(base_url: str, page_limit: int = 1000) -> pd.DataFrame
                 break
             records.extend(batch)
             offset += len(batch)
-            # seguridad: si el batch es menor que page_limit, terminamos
             if len(batch) < page_limit:
                 break
-        df = pd.DataFrame(records)
-        return df
+        return pd.DataFrame(records)
     except Exception as e:
-        # devolvemos DataFrame vacío en caso de fallo (la app mostrará la advertencia)
         st.error(f"Error descargando datos desde la API: {e}")
         return pd.DataFrame()
 
 @st.cache_data
 def load_csv_local(path: str) -> pd.DataFrame:
-    # intenta utf-8, si falla intenta latin-1
     try:
         return pd.read_csv(path, encoding="utf-8", low_memory=False)
     except Exception:
@@ -79,8 +73,11 @@ def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
     buf.seek(0)
     return buf.getvalue()
 
+# Lista de meses en español (normalizados)
+MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"]
+
 # ----------------------------
-# BARRA LATERAL: escoger fuente
+# BARRA LATERAL: escoger fuente y opciones de visualización
 # ----------------------------
 st.sidebar.header("📁 Fuente de datos")
 fuente = st.sidebar.radio("Origen de datos:", ("API (datos.gob.cl)", "CSV local (carpeta /data)"))
@@ -95,7 +92,6 @@ if fuente == "API (datos.gob.cl)":
         url = API_DATASETS[dataset_name]
         with st.spinner(f"Descargando datos desde API: {dataset_name} ..."):
             df = fetch_api_all_records(url, page_limit=1000)
-
 else:
     st.sidebar.info("Selecciona un CSV que hayas subido a la carpeta /data/")
     archivos = listar_csvs()
@@ -109,206 +105,184 @@ else:
             dataset_name = archivo_sel
 
 # ----------------------------
-# Validación y normalización
+# Validación básica
 # ----------------------------
 if df is None or (isinstance(df, pd.DataFrame) and df.empty):
     st.warning("No se cargaron datos desde la fuente seleccionada. Revisa la barra lateral.")
     st.stop()
 
+# Normalizar nombres de columnas
 df = normalizar_columnas(df)
 
 # ----------------------------
-# EXPLORACIÓN INICIAL (esto te permite ver exactamente las columnas)
+# Conversión y limpieza inicial
 # ----------------------------
-st.header("📌 Exploración inicial de los datos")
-st.subheader("Primeras filas")
-st.write(df.head(10))
-
-st.subheader("Nombres de columnas")
-st.write(list(df.columns))
-
-st.subheader("Información del dataset (describe)")
-# mostramos describe solo si hay columnas numéricas o mixtas
-with st.expander("Ver resumen estadístico (describe)"):
-    try:
-        st.write(df.describe(include="all").T)
-    except Exception as e:
-        st.write("No se pudo generar describe:", e)
-
-st.subheader("Tipos de datos por columna")
-st.write(df.dtypes)
-
-st.subheader("Valores faltantes por columna")
-st.write(df.isna().sum())
-
-# --- Tratamiento de valores faltantes ---
-st.subheader("🔧 Tratamiento de valores faltantes")
-
-st.write("Antes del tratamiento:")
-st.write(df.isna().sum())
-
-# Rellenar NA con 0
+# Rellenar NA con 0 (lo pediste)
 df = df.fillna(0)
 
-st.write("Después del tratamiento:")
-st.write(df.isna().sum())
-
-# ---------------------------------------------
-# 🔧 Limpieza de datos
-# ---------------------------------------------
-st.header("🧹 Limpieza de Datos")
-
-st.subheader("Rellenando valores faltantes con 0...")
-df = df.fillna(0)
-st.write("✔ Valores faltantes rellenados con 0")
-
-# Identificar columnas numéricas que están como 'object'
-cols_object = df.select_dtypes(include=['object']).columns
-
-# Intentar convertirlas a numérico cuando sea posible
-for col in cols_object:
-    df[col] = pd.to_numeric(df[col], errors='ignore')
-
-st.subheader("Tipos de datos después de la limpieza")
-st.write(df.dtypes)
-
-st.subheader("Verificación de valores faltantes (debe dar todo 0)")
-st.write(df.isna().sum())
+# Intentar convertir columnas que parezcan numéricas
+for c in df.columns:
+    if df[c].dtype == object:
+        # quitar puntos/espacios extras en números y comas decimales
+        sample = df[c].astype(str).head(20).str.replace(r"[^\d\-,\.]", "", regex=True)
+        # si la mayoría parecen números, convertir
+        n_nums = sample.str.replace(",", "").str.replace("-", "").str.isnumeric().sum()
+        if n_nums >= 3:
+            df[c] = pd.to_numeric(df[c].astype(str).str.replace(",", ""), errors='coerce').fillna(0)
 
 # ----------------------------
-# BUSCADOR Y FILTROS
+# EXPLORACIÓN INICIAL (minimizada, porque quieres menos texto)
 # ----------------------------
-st.header("🔎 Buscador y filtros")
+st.subheader("Vista previa")
+st.dataframe(df.head(8))
 
+# Mostrar lista de columnas (útil para que veas nombres exactos)
+with st.expander("Columnas (ver)"):
+    st.write(list(df.columns))
+
+# ----------------------------
+# Detectar columnas meses y opción de pivot
+# ----------------------------
 cols = list(df.columns)
-# --- 3.3 Exploración inicial del dataset ---
-st.header("📊 Exploración inicial del dataset")
+month_cols = [c for c in cols if any(m in c for m in MESES)]
 
-st.subheader("Primeras filas del dataset")
-st.write(df.head())
+# Opción de pivot (ancho -> largo) para datasets que vengan por meses
+pivot_opt = False
+if month_cols:
+    pivot_opt = st.sidebar.checkbox("Transformar columnas por mes a formato largo (pivot/melt)", value=True)
 
-st.subheader("Estadísticas generales")
-st.write(df.describe(include="all"))
+# ----------------------------
+# Detectar columna categórica (mejor heurística)
+# ----------------------------
+possible_cat_names = ["delito","tipo_delito","categoria","categoria_delito","comuna","region","nombre_delito"]
+cat_col = None
+for name in possible_cat_names:
+    if name in df.columns:
+        cat_col = name
+        break
 
-st.subheader("Tipos de datos")
-st.write(df.dtypes)
+# Si no encontramos, buscar la columna con más valores únicos y tipo object (pero no _id)
+if cat_col is None:
+    object_cols = [c for c in df.columns if df[c].dtype == object and c != "_id"]
+    if object_cols:
+        # elegimos la que tenga más valores únicos (pero no demasiados)
+        uniq_counts = {c: df[c].nunique() for c in object_cols}
+        cand = sorted(uniq_counts.items(), key=lambda x: x[1])
+        # tomar la primera con unico <= 200 (evitar columnas identificadoras)
+        for c, u in cand:
+            if u <= 200:
+                cat_col = c
+                break
 
-st.subheader("Valores faltantes por columna")
-st.write(df.isna().sum())
+# ----------------------------
+# Transformación pivot si aplica
+# ----------------------------
+df_display = df.copy()
+if pivot_opt and month_cols:
+    id_vars = [c for c in df.columns if c not in month_cols]
+    df_display = df.melt(id_vars=id_vars, value_vars=month_cols, var_name="mes", value_name="valor_mes")
+    # normalizar mes y valor
+    df_display["mes"] = df_display["mes"].astype(str).str.strip().str.lower()
+    df_display["valor_mes"] = pd.to_numeric(df_display["valor_mes"], errors="coerce").fillna(0)
+    # si no hay cat_col originalmente, intentar asignar uno razonable
+    if cat_col is None:
+        # buscar alguna columna con pocos valores únicos
+        for c in id_vars:
+            if df[c].nunique() <= 200 and c != "_id":
+                cat_col = c
+                break
 
-# columna para búsqueda de texto
-col_buscar = st.selectbox("Columna para buscar (texto)", cols, index=0)
-texto = st.text_input("Texto a buscar (filtra en la columna seleccionada)")
+# ----------------------------
+# Ranking — categorías más frecuentes
+# ----------------------------
+st.header("🏆 Ranking — Categorías más frecuentes")
+if cat_col:
+    try:
+        if pivot_opt and month_cols:
+            rank = df_display.groupby(cat_col)["valor_mes"].sum().sort_values(ascending=False)
+        else:
+            # sumar columnas numéricas por categoría si existen
+            num_cols = df.select_dtypes(include="number").columns.tolist()
+            if num_cols:
+                rank = df.groupby(cat_col)[num_cols].sum().sum(axis=1).sort_values(ascending=False)
+            else:
+                rank = df[cat_col].value_counts()
+        st.bar_chart(rank.head(10))
+        st.write(rank.head(10))
+    except Exception as e:
+        st.error(f"Error generando ranking: {e}")
+else:
+    st.info("No se encontraron columnas claramente categóricas (tipo_delito/comuna/region).")
 
-df_filtrado = df.copy()
+# ----------------------------
+# Gráficos interactivos
+# ----------------------------
+st.header("📊 Gráficos interactivos")
+
+# Preparo lista de columnas numéricas útiles (excluyo _id)
+numeric_cols = [c for c in df_display.select_dtypes(include="number").columns if c != "_id"]
+if numeric_cols:
+    sel_num = st.selectbox("Selecciona columna numérica", numeric_cols)
+    # Si pivot aplicado, hay 'valor_mes' y 'mes' que permiten hacer series por mes
+    if pivot_opt and month_cols:
+        # gráfico por categoría y mes
+        if cat_col:
+            cat_choice = st.selectbox("Selecciona categoría (para series)", [None] + sorted(df_display[cat_col].unique().tolist()))
+            if cat_choice:
+                sub = df_display[df_display[cat_col] == cat_choice]
+            else:
+                sub = df_display
+            fig = px.line(sub.groupby("mes")[sel_num].sum().reindex(MESES).fillna(0).reset_index(), x="mes", y=sel_num, title=f"{sel_num} por mes")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            # solo serie por mes
+            ser = df_display.groupby("mes")[sel_num].sum().reindex(MESES).fillna(0).reset_index()
+            fig = px.line(ser, x="mes", y=sel_num, title=f"{sel_num} por mes")
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        # sin pivot: gráfico simple por filas (ej. totales por columna)
+        fig = px.histogram(df_display, x=sel_num, nbins=30, title=f"Distribución de {sel_num}")
+        st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("No se detectan columnas numéricas útiles. (Si tus datos están en columnas por mes, activa la opción 'pivot' en la barra lateral.)")
+
+# Gráfico extra creativo: Treemap de top categorías (si existe)
+if cat_col and (pivot_opt and month_cols or (df.select_dtypes(include="number").any().any())):
+    st.subheader("🌳 Treemap — Distribución por categoría")
+    try:
+        if pivot_opt and month_cols:
+            treemap_df = df_display.groupby(cat_col)["valor_mes"].sum().reset_index().sort_values("valor_mes", ascending=False).head(100)
+            fig = px.treemap(treemap_df, path=[cat_col], values="valor_mes", title="Treemap — Top categorías")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            # sumar todas las columnas numéricas por categoría
+            num_cols_all = df.select_dtypes(include="number").columns.tolist()
+            if num_cols_all:
+                agg = df.groupby(cat_col)[num_cols_all].sum().sum(axis=1).reset_index(name="total")
+                agg = agg.sort_values("total", ascending=False).head(100)
+                fig = px.treemap(agg, path=[cat_col], values="total", title="Treemap — Top categorías")
+                st.plotly_chart(fig, use_container_width=True)
+    except Exception as e:
+        st.write("No fue posible generar treemap:", e)
+
+# ----------------------------
+# Tabla filtrada y descarga
+# ----------------------------
+st.header("🔎 Tabla filtrada / Descargar")
+st.write("Filtra la tabla por texto en una columna:")
+
+cols_display = [c for c in df_display.columns]
+col_buscar = st.selectbox("Columna para filtrar (texto)", cols_display, index=0)
+texto = st.text_input("Texto a buscar (mayúsc/minúsc no importa)")
+
+df_filtrado = df_display.copy()
 if texto:
     df_filtrado = df_filtrado[df_filtrado[col_buscar].astype(str).str.contains(texto, case=False, na=False)]
 
-# filtrado por año si existe columna 'año' o 'anio' o 'year'
-anio_cols = [c for c in cols if "año" in c or "anio" in c or "year" in c]
-if anio_cols:
-    c_anio = anio_cols[0]
-    años = sorted(df[c_anio].dropna().unique())
-    if len(años) > 0:
-        año_sel = st.sidebar.selectbox("Filtrar por año", ["Todos"] + [str(x) for x in años])
-        if año_sel != "Todos":
-            df_filtrado = df_filtrado[df_filtrado[c_anio].astype(str) == año_sel]
-
-st.write(f"Resultados (filtrados): {len(df_filtrado)}")
+st.write(f"Registros mostrados: {len(df_filtrado)}")
 st.dataframe(df_filtrado.head(200))
 
-# ----------------------------
-# GRÁFICOS AUTOMÁTICOS Y ANÁLISIS
-# ----------------------------
-st.header("📊 Visualizaciones rápidas")
-
-# si existen columnas numéricas, permitir graficar
-num_cols = df_filtrado.select_dtypes(include="number").columns.tolist()
-if num_cols:
-    col_graf = st.selectbox("Columna numérica para graficar", num_cols)
-    tipo_graf = st.selectbox("Tipo de gráfico", ["Línea", "Barras"])
-    if tipo_graf == "Línea":
-        st.line_chart(df_filtrado[col_graf])
-    else:
-        st.bar_chart(df_filtrado[col_graf])
-else:
-    st.info("No se detectaron columnas numéricas para graficar. Si tus datos vienen en columnas por mes (enero,febrero,...), puedes pivotearlos — dime si quieres que agregue esa transformación.")
-    
-# ---------------------------------------------
-# 📊 PASO 4.1 — Análisis general del dataset
-# ---------------------------------------------
-st.header("📈 Análisis General del Dataset")
-
-# Identificar columnas numéricas
-num_cols = df.select_dtypes(include="number").columns.tolist()
-
-# Identificar columnas de texto relevantes
-text_cols = df.select_dtypes(include="object").columns.tolist()
-
-# =====================
-# 1️⃣ Totales por columnas numéricas
-# =====================
-st.subheader("🔹 Totales por columna numérica")
-if num_cols:
-    totales = df[num_cols].sum().sort_values(ascending=False)
-    st.write(totales)
-else:
-    st.info("No hay columnas numéricas para calcular totales.")
-
-# =====================
-# 2️⃣ Frecuencia de categorías (si existe columna tipo_delito, comuna, etc.)
-# =====================
-posibles_categorias = ["delito", "tipo_delito", "comuna", "region", "categoria"]
-
-col_categorica = None
-for c in posibles_categorias:
-    if c in df.columns:
-        col_categorica = c
-        break
-
-if col_categorica:
-    st.subheader(f"🔹 Frecuencia por '{col_categorica}'")
-    st.write(df[col_categorica].value_counts().head(20))
-
-# =====================
-# 3️⃣ Si existe columna año/anio/year → análisis anual
-# =====================
-anio_cols = [c for c in df.columns if "año" in c or "anio" in c or "year" in c]
-
-if anio_cols:
-    col_anio = anio_cols[0]
-    st.subheader(f"🔹 Casos por año ({col_anio})")
-
-    # convertir a número si es texto
-    df[col_anio] = pd.to_numeric(df[col_anio], errors="coerce").fillna(0).astype(int)
-
-    conteo_anual = df.groupby(col_anio)[num_cols].sum()
-    st.write(conteo_anual)
-
-    st.subheader("📉 Tendencia anual (suma de todas las columnas numéricas)")
-    st.line_chart(conteo_anual.sum(axis=1))
-
-# =====================
-# 4️⃣ Identificar columna con mayor valor total
-# =====================
-if num_cols:
-    col_max = totales.idxmax()
-    st.success(f"📌 **La columna con mayor valor total es:** {col_max}")
-
-# ----------------------------
-# DESCARGA
-# ----------------------------
-st.header("⬇️ Descargar datos filtrados")
 csv_bytes = df_to_csv_bytes(df_filtrado)
-st.download_button("Descargar CSV filtrado", data=csv_bytes, file_name=f"{(dataset_name or 'dataset')}_filtrado.csv", mime="text/csv")
+st.download_button("⬇️ Descargar CSV filtrado", data=csv_bytes, file_name=f"{(dataset_name or 'dataset')}_filtrado.csv", mime="text/csv")
 
-# ----------------------------
-# AYUDA / NOTAS
-# ----------------------------
-st.markdown("---")
-st.info(
-    "Notas:\n"
-    "- Si al conectar la API ves columnas como 'enero','febrero', etc., eso significa que el dataset está en formato ancho (meses como columnas). "
-    "Si quieres ver los tipos de delitos por fila (formato largo), puedo agregar una transformación (melt/pivot) para normalizar. "
-)
-st.caption("Si quieres que convierta columnas por mes a formato largo (tipo_delito, mes, valor), escribe: 'pivot meses' y lo agrego.")
+st.caption("Si quieres menos texto en la página pido quitar los expanders o algunos st.write; dime qué se debe mostrar exactamente y lo simplifico.")
