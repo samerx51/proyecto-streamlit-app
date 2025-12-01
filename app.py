@@ -8,7 +8,7 @@ from io import BytesIO
 # CONFIG
 # ----------------------
 st.set_page_config(page_title="Estadísticas Policiales Chile", layout="wide")
-st.title("Estadísticas Policiales en Chile — PDI & Seguridad Pública")
+st.title("📊 Estadísticas Policiales en Chile — PDI & Seguridad Pública")
 
 # APIs disponibles desde datos.gob.cl
 API_DATASETS = {
@@ -58,7 +58,7 @@ def convertir_csv(df):
 # ----------------------
 # SIDEBAR - selección de fuente
 # ----------------------
-st.sidebar.header("Fuente de datos")
+st.sidebar.header("📁 Fuente de datos")
 
 fuente = st.sidebar.radio(
     "Seleccionar origen de información:",
@@ -125,13 +125,13 @@ if columnas_anio:
     if año_sel != "Todos":
         df_filtrado = df_filtrado[df_filtrado[col_anio] == año_sel]
 
-st.write(f"Resultados encontrados: {len(df_filtrado)}")
+st.write(f"✅ Resultados encontrados: {len(df_filtrado)}")
 st.dataframe(df_filtrado)
 
 # ----------------------
 # GRÁFICO AUTOMÁTICO
 # ----------------------
-st.header("Visualización")
+st.header("📊 Visualización")
 
 num_cols = df_filtrado.select_dtypes(include="number").columns.tolist()
 
@@ -146,4 +146,10 @@ else:
 # ----------------------
 st.header("⬇️ Descargar datos filtrados")
 st.download_button(
+    "Descargar CSV",
+    data=convertir_csv(df_filtrado),
+    file_name="datos_filtrados.csv",
+    mime="text/csv"
+)
 
+st.caption("✅ Proyecto Streamlit — Seguridad Pública Chile")
