@@ -316,4 +316,3 @@ csv_bytes = df_to_csv_bytes(df_filtrado)
 st.download_button("⬇️ Descargar CSV filtrado", data=csv_bytes, file_name=f"{(dataset_name or 'dataset')}_filtrado.csv", mime="text/csv")
 
 st.caption("Si quieres menos texto en la página pido quitar los expanders o algunos st.write; dime qué se debe mostrar exactamente y lo simplifico.")
-)
