@@ -1,14 +1,18 @@
+# app.py
 import streamlit as st
 import pandas as pd
 import requests
 import os
 from io import BytesIO
-from typing import Dict, Any
+from typing import Dict
 import plotly.express as px
 
 st.set_page_config(page_title="Estadísticas Policiales Chile", layout="wide")
-st.title("Estadísticas Policiales en Chile — PDI & datos.gob.cl")
+st.title("📊 Estadísticas Policiales en Chile — PDI & datos.gob.cl")
 
+# ----------------------------
+# CONFIG: APIs
+# ----------------------------
 API_DATASETS: Dict[str, str] = {
     "Victimas": "https://datos.gob.cl/api/3/action/datastore_search?resource_id=285a2c22-9301-4456-9e18-9fd8dbb1c6f2",
     "Controles de identidad": "https://datos.gob.cl/api/3/action/datastore_search?resource_id=69b8c48b-1d64-4296-8275-f3d2abfe1f0e",
@@ -18,10 +22,13 @@ API_DATASETS: Dict[str, str] = {
 }
 
 DATA_FOLDER = "data"
+MESES_ORDER = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"]
 
+# ----------------------------
+# UTIL: funciones
+# ----------------------------
 @st.cache_data(show_spinner=False)
 def fetch_api_all_records(base_url: str, page_limit: int = 1000) -> pd.DataFrame:
-    """Descarga todos los registros de una API tipo CKAN/datastore_search con paginación."""
     records = []
     offset = 0
     params = {"limit": page_limit, "offset": offset}
@@ -55,7 +62,7 @@ def listar_csvs(folder: str = DATA_FOLDER):
         return []
     return sorted([f for f in os.listdir(folder) if f.lower().endswith(".csv")])
 
-def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
+def normalizar_colnames(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
     return df
@@ -66,30 +73,38 @@ def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
     buf.seek(0)
     return buf.getvalue()
 
-# Lista de meses en español (normalizados)
-MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"]
+def try_convert_numeric_columns(df: pd.DataFrame, min_numeric_samples: int = 3) -> pd.DataFrame:
+    """Intenta convertir columnas object a numéricas si la mayoría de muestras parecen números."""
+    df = df.copy()
+    for c in df.columns:
+        if df[c].dtype == object:
+            sample = df[c].astype(str).head(20).str.replace(r"[^\d\-,\.]", "", regex=True)
+            n_nums = sample.str.replace(",", "").str.replace("-", "").str.isnumeric().sum()
+            if n_nums >= min_numeric_samples:
+                df[c] = pd.to_numeric(df[c].astype(str).str.replace(",", ""), errors="coerce").fillna(0)
+    return df
 
 # ----------------------------
-# BARRA LATERAL: escoger fuente y opciones de visualización
+# SIDEBAR: fuente y opciones
 # ----------------------------
-st.sidebar.header("📁 Fuente de datos")
+st.sidebar.header("Fuente de datos")
 fuente = st.sidebar.radio("Origen de datos:", ("API (datos.gob.cl)", "CSV local (carpeta /data)"))
 
 df = pd.DataFrame()
 dataset_name = None
 
 if fuente == "API (datos.gob.cl)":
-    st.sidebar.info("Selecciona el dataset de datos.gob.cl (cuando selecciones, se descargan los registros).")
+    st.sidebar.info("Selecciona dataset (datos.gob.cl)")
     dataset_name = st.sidebar.selectbox("Dataset (API)", list(API_DATASETS.keys()))
     if dataset_name:
         url = API_DATASETS[dataset_name]
-        with st.spinner(f"Descargando datos desde API: {dataset_name} ..."):
-            df = fetch_api_all_records(url, page_limit=1000)
+        with st.spinner("Descargando datos..."):
+            df = fetch_api_all_records(url)
 else:
-    st.sidebar.info("Selecciona un CSV que hayas subido a la carpeta /data/")
+    st.sidebar.info("Selecciona CSV local")
     archivos = listar_csvs()
     if not archivos:
-        st.sidebar.warning("No hay archivos CSV en /data/. Súbelos a GitHub y espera a que el deploy se actualice.")
+        st.sidebar.warning("No hay archivos CSV en /data/. Súbelos al repo.")
     else:
         archivo_sel = st.sidebar.selectbox("CSV local", archivos)
         if archivo_sel:
@@ -97,222 +112,183 @@ else:
             df = load_csv_local(ruta)
             dataset_name = archivo_sel
 
-# ----------------------------
-# Validación básica
-# ----------------------------
+# Validación
 if df is None or (isinstance(df, pd.DataFrame) and df.empty):
-    st.warning("No se cargaron datos desde la fuente seleccionada. Revisa la barra lateral.")
+    st.warning("No se cargaron datos. Revisa la barra lateral.")
     st.stop()
 
-# Normalizar nombres de columnas
-df = normalizar_columnas(df)
+# Normalizar nombres
+df = normalizar_colnames(df)
 
-# ----------------------------
-# Conversión y limpieza inicial
-# ----------------------------
-# Rellenar NA con 0 (lo pediste)
+# Rellenar NA con 0 (según lo solicitado)
 df = df.fillna(0)
 
-# Intentar convertir columnas que parezcan numéricas
-for c in df.columns:
-    if df[c].dtype == object:
-        # quitar puntos/espacios extras en números y comas decimales
-        sample = df[c].astype(str).head(20).str.replace(r"[^\d\-,\.]", "", regex=True)
-        # si la mayoría parecen números, convertir
-        n_nums = sample.str.replace(",", "").str.replace("-", "").str.isnumeric().sum()
-        if n_nums >= 3:
-            df[c] = pd.to_numeric(df[c].astype(str).str.replace(",", ""), errors='coerce').fillna(0)
-# ============================
-# 🔄 TRANSFORMACIÓN A FORMATO LARGO
-# ============================
-
-# 1. Identificar columnas de delitos (todas excepto _id y total_general)
-columnas_delitos = [
-    c for c in df.columns 
-    if c not in ["_id", "total_general", "delitos_segun_agrupacion_por_modernizacion"]
-]
-
-# 2. Renombrar columna de delitos para claridad
-df = df.rename(columns={"delitos_segun_agrupacion_por_modernizacion": "delito"})
-
-# 3. Hacer melt (convertir a formato largo)
-df_long = df.melt(
-    id_vars=["delito"], 
-    value_vars=columnas_delitos,
-    var_name="region",
-    value_name="cantidad"
-)
-
-# 4. Limpiar la región: quitar "region_de_" y reemplazar guiones
-df_long["region"] = (
-    df_long["region"]
-    .str.replace("region_de_", "", regex=False)
-    .str.replace("_", " ")
-    .str.capitalize()
-)
-
-# 5. Ordenar para lectura
-df_long = df_long.sort_values(["delito", "region"]).reset_index(drop=True)
-
-st.subheader("📌 Datos transformados a formato largo (delito – región – cantidad)")
-st.dataframe(df_long.head(50))
-
-# df_long es el que usarás desde ahora para graficar y filtrar
-
+# Intentar convertir strings numéricos
+df = try_convert_numeric_columns(df)
 
 # ----------------------------
-# EXPLORACIÓN INICIAL (minimizada, porque quieres menos texto)
+# IDENTIFICAR columnas de delitos / meses / categoría
 # ----------------------------
-st.subheader("Vista previa")
-st.dataframe(df.head(8))
+# Heurística: si existe columna llamada 'delitos_segun_agrupacion_por_modernizacion' -> la renombramos a 'delito'
+if "delitos_segun_agrupacion_por_modernizacion" in df.columns:
+    df = df.rename(columns={"delitos_segun_agrupacion_por_modernizacion": "delito"})
 
-# Mostrar lista de columnas (útil para que veas nombres exactos)
-with st.expander("Columnas (ver)"):
-    st.write(list(df.columns))
-
-# ----------------------------
-# Detectar columnas meses y opción de pivot
-# ----------------------------
+# Detectar columnas que son meses (contienen nombre de mes)
 cols = list(df.columns)
-month_cols = [c for c in cols if any(m in c for m in MESES)]
+month_cols = [c for c in cols if any(m in c for m in MESES_ORDER)]
+# Si no detecta meses y hay columnas que claramente son regiones (region_...), las dejamos como están.
 
-# Opción de pivot (ancho -> largo) para datasets que vengan por meses
-pivot_opt = False
-if month_cols:
-    pivot_opt = st.sidebar.checkbox("Transformar columnas por mes a formato largo (pivot/melt)", value=True)
-
-# ----------------------------
-# Detectar columna categórica (mejor heurística)
-# ----------------------------
+# Detectar columna categórica principal (delito, tipo_delito, etc.)
 possible_cat_names = ["delito","tipo_delito","categoria","categoria_delito","comuna","region","nombre_delito"]
 cat_col = None
-for name in possible_cat_names:
-    if name in df.columns:
-        cat_col = name
+for n in possible_cat_names:
+    if n in df.columns:
+        cat_col = n
         break
 
-# Si no encontramos, buscar la columna con más valores únicos y tipo object (pero no _id)
+# Si no encontramos cat_col, elegir columna object con pocos valores únicos
 if cat_col is None:
     object_cols = [c for c in df.columns if df[c].dtype == object and c != "_id"]
-    if object_cols:
-        # elegimos la que tenga más valores únicos (pero no demasiados)
-        uniq_counts = {c: df[c].nunique() for c in object_cols}
-        cand = sorted(uniq_counts.items(), key=lambda x: x[1])
-        # tomar la primera con unico <= 200 (evitar columnas identificadoras)
-        for c, u in cand:
-            if u <= 200:
-                cat_col = c
-                break
+    cand = sorted(object_cols, key=lambda x: df[x].nunique() if x in df.columns else 9999)
+    for c in cand:
+        if df[c].nunique() <= 200:
+            cat_col = c
+            break
 
 # ----------------------------
-# Transformación pivot si aplica
+# TRANSFORMACIÓN: si hay columnas por mes -> pivot a formato largo
 # ----------------------------
-df_display = df.copy()
-if pivot_opt and month_cols:
+df_display = df.copy()  # dataframe que usaremos para mostrar / filtrar
+
+if month_cols:
+    # id_vars = todas las columnas que no son month_cols
     id_vars = [c for c in df.columns if c not in month_cols]
+    # asegurarse que exista una columna categorica (preferentemente 'delito')
+    if cat_col is None:
+        # si 'delito' no existe, tomar primera id_var no-_id
+        for c in id_vars:
+            if c != "_id":
+                cat_col = c
+                break
     df_display = df.melt(id_vars=id_vars, value_vars=month_cols, var_name="mes", value_name="valor_mes")
     # normalizar mes y valor
     df_display["mes"] = df_display["mes"].astype(str).str.strip().str.lower()
     df_display["valor_mes"] = pd.to_numeric(df_display["valor_mes"], errors="coerce").fillna(0)
-    # si no hay cat_col originalmente, intentar asignar uno razonable
-    if cat_col is None:
-        # buscar alguna columna con pocos valores únicos
-        for c in id_vars:
-            if df[c].nunique() <= 200 and c != "_id":
-                cat_col = c
-                break
 
 # ----------------------------
-# Ranking — categorías más frecuentes
+# VISTA PREVIA COMPACTA
+# ----------------------------
+st.subheader("Vista previa")
+st.dataframe(df.head(8))
+
+with st.expander("Columnas (ver)"):
+    st.write(list(df.columns))
+
+# ----------------------------
+# RANKING — categorías más frecuentes (compacto)
 # ----------------------------
 st.header("🏆 Ranking — Categorías más frecuentes")
 if cat_col:
     try:
-        if pivot_opt and month_cols:
+        if month_cols and "valor_mes" in df_display.columns:
             rank = df_display.groupby(cat_col)["valor_mes"].sum().sort_values(ascending=False)
         else:
-            # sumar columnas numéricas por categoría si existen
             num_cols = df.select_dtypes(include="number").columns.tolist()
             if num_cols:
                 rank = df.groupby(cat_col)[num_cols].sum().sum(axis=1).sort_values(ascending=False)
             else:
                 rank = df[cat_col].value_counts()
-        st.bar_chart(rank.head(10))
+        st.plotly_chart(px.bar(rank.head(10).reset_index().rename(columns={cat_col:"categoria", 0:"valor"}), x=cat_col, y=rank.name or "valor"), use_container_width=True)
         st.write(rank.head(10))
     except Exception as e:
         st.error(f"Error generando ranking: {e}")
 else:
-    st.info("No se encontraron columnas claramente categóricas (tipo_delito/comuna/region).")
+    st.info("No se encontraron columnas categóricas claras (tipo_delito/comuna/region).")
 
 # ----------------------------
-# Gráficos interactivos
+# GRÁFICOS INTERACTIVOS (centrales)
 # ----------------------------
-st.header("📊 Gráficos interactivos")
+st.header("📊 Gráficos interactivos (interactúa desde acá)")
 
-# Preparo lista de columnas numéricas útiles (excluyo _id)
+# Preparar lista de columnas numéricas en df_display
 numeric_cols = [c for c in df_display.select_dtypes(include="number").columns if c != "_id"]
 if numeric_cols:
-    sel_num = st.selectbox("Selecciona columna numérica", numeric_cols)
-    # Si pivot aplicado, hay 'valor_mes' y 'mes' que permiten hacer series por mes
-    if pivot_opt and month_cols:
-        # gráfico por categoría y mes
+    sel_num = st.selectbox("Selecciona columna numérica", numeric_cols, index=0)
+    # Si pivot aplicado (meses)
+    if "valor_mes" in df_display.columns:
+        # permitir elegir categoría para filtrar series
         if cat_col:
-            cat_choice = st.selectbox("Selecciona categoría (para series)", [None] + sorted(df_display[cat_col].unique().tolist()))
+            opciones_cat = [None] + sorted(df_display[cat_col].astype(str).unique().tolist())
+            cat_choice = st.selectbox("Selecciona categoría (opcional) para ver serie por mes", opciones_cat)
             if cat_choice:
-                sub = df_display[df_display[cat_col] == cat_choice]
+                sub = df_display[df_display[cat_col].astype(str) == cat_choice]
             else:
                 sub = df_display
-            fig = px.line(sub.groupby("mes")[sel_num].sum().reindex(MESES).fillna(0).reset_index(), x="mes", y=sel_num, title=f"{sel_num} por mes")
-            st.plotly_chart(fig, use_container_width=True)
         else:
-            # solo serie por mes
-            ser = df_display.groupby("mes")[sel_num].sum().reindex(MESES).fillna(0).reset_index()
-            fig = px.line(ser, x="mes", y=sel_num, title=f"{sel_num} por mes")
-            st.plotly_chart(fig, use_container_width=True)
+            sub = df_display
+
+        # Agrupar por mes en el orden definido
+        ser = sub.groupby("mes")[sel_num].sum().reindex(MESES_ORDER).fillna(0).reset_index()
+        fig = px.line(ser, x="mes", y=sel_num, title=f"{sel_num} por mes", markers=True)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Top N delitos (si cat_col existe)
+        if cat_col:
+            st.subheader("Top delitos (suma total)")
+            top_n = st.slider("Top N", 3, 20, 7)
+            top_df = df_display.groupby(cat_col)["valor_mes"].sum().reset_index().sort_values("valor_mes", ascending=False).head(top_n)
+            fig2 = px.bar(top_df, x=cat_col, y="valor_mes", title=f"Top {top_n} {cat_col} (suma total)")
+            st.plotly_chart(fig2, use_container_width=True)
+
     else:
-        # sin pivot: gráfico simple por filas (ej. totales por columna)
+        # sin pivot: mostramos histograma y top categorías si aplica
         fig = px.histogram(df_display, x=sel_num, nbins=30, title=f"Distribución de {sel_num}")
         st.plotly_chart(fig, use_container_width=True)
-else:
-    st.info("No se detectan columnas numéricas útiles. (Si tus datos están en columnas por mes, activa la opción 'pivot' en la barra lateral.)")
 
-# Gráfico extra creativo: Treemap de top categorías (si existe)
-if cat_col and (pivot_opt and month_cols or (df.select_dtypes(include="number").any().any())):
-    st.subheader("🌳 Treemap — Distribución por categoría")
+        if cat_col:
+            st.subheader("Top categorías por suma")
+            top_n = st.slider("Top N", 3, 20, 7)
+            num_cols_all = df.select_dtypes(include="number").columns.tolist()
+            if num_cols_all:
+                agg = df.groupby(cat_col)[num_cols_all].sum().sum(axis=1).reset_index(name="total").sort_values("total", ascending=False).head(top_n)
+                fig3 = px.bar(agg, x=cat_col, y="total", title=f"Top {top_n} {cat_col} por total")
+                st.plotly_chart(fig3, use_container_width=True)
+else:
+    st.info("No se detectan columnas numéricas útiles. Activa 'pivot' si tus datos vienen por meses.")
+
+# Treemap creativo (si aplica)
+if cat_col and (("valor_mes" in df_display.columns and df_display["valor_mes"].sum() > 0) or (df.select_dtypes(include="number").any().any())):
     try:
-        if pivot_opt and month_cols:
-            treemap_df = df_display.groupby(cat_col)["valor_mes"].sum().reset_index().sort_values("valor_mes", ascending=False).head(100)
+        st.subheader("🌳 Treemap — Distribución por categoría")
+        if "valor_mes" in df_display.columns:
+            treemap_df = df_display.groupby(cat_col)["valor_mes"].sum().reset_index().sort_values("valor_mes", ascending=False).head(200)
             fig = px.treemap(treemap_df, path=[cat_col], values="valor_mes", title="Treemap — Top categorías")
             st.plotly_chart(fig, use_container_width=True)
         else:
-            # sumar todas las columnas numéricas por categoría
             num_cols_all = df.select_dtypes(include="number").columns.tolist()
             if num_cols_all:
-                agg = df.groupby(cat_col)[num_cols_all].sum().sum(axis=1).reset_index(name="total")
-                agg = agg.sort_values("total", ascending=False).head(100)
+                agg = df.groupby(cat_col)[num_cols_all].sum().sum(axis=1).reset_index(name="total").sort_values("total", ascending=False).head(200)
                 fig = px.treemap(agg, path=[cat_col], values="total", title="Treemap — Top categorías")
                 st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
         st.write("No fue posible generar treemap:", e)
 
 # ----------------------------
-# Tabla filtrada y descarga
+# TABLA FILTRADA Y DESCARGA (compacta)
 # ----------------------------
 st.header("🔎 Tabla filtrada / Descargar")
-st.write("Filtra la tabla por texto en una columna:")
-
 cols_display = [c for c in df_display.columns]
 col_buscar = st.selectbox("Columna para filtrar (texto)", cols_display, index=0)
-texto = st.text_input("Texto a buscar (mayúsc/minúsc no importa)")
+texto = st.text_input("Texto a buscar (no sensible a mayúsculas)")
 
 df_filtrado = df_display.copy()
 if texto:
     df_filtrado = df_filtrado[df_filtrado[col_buscar].astype(str).str.contains(texto, case=False, na=False)]
 
-st.write(f"Registros mostrados: {len(df_filtrado)}")
+st.write(f"Registros: {len(df_filtrado)}")
 st.dataframe(df_filtrado.head(200))
 
 csv_bytes = df_to_csv_bytes(df_filtrado)
 st.download_button("⬇️ Descargar CSV filtrado", data=csv_bytes, file_name=f"{(dataset_name or 'dataset')}_filtrado.csv", mime="text/csv")
 
-st.caption("Si quieres menos texto en la página pido quitar los expanders o algunos st.write; dime qué se debe mostrar exactamente y lo simplifico.")
+st.caption("Si quieres quitar textos/expanders para una vista más limpia dímelo y lo simplifico.")
