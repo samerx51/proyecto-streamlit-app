@@ -1,16 +1,16 @@
-# app.py - Versión estable y visual (Plotly) para Estadísticas PDI (API + CSV local)
 import streamlit as st
 import pandas as pd
 import requests
-import os
 from io import BytesIO
-from typing import Dict, List
+from typing import Dict, List, Optional
 import plotly.express as px
 
-# ---------- Config y constantes ----------
-st.set_page_config(page_title="Estadísticas Policiales Chile", layout="wide")
+st.set_page_config(page_title="Estadísticas Policiales Chile (API)", layout="wide")
 st.title("📊 Estadísticas Policiales en Chile — PDI & datos.gob.cl")
 
+# ----------------------------
+# CONFIG: APIs
+# ----------------------------
 API_DATASETS: Dict[str, str] = {
     "Victimas": "https://datos.gob.cl/api/3/action/datastore_search?resource_id=285a2c22-9301-4456-9e18-9fd8dbb1c6f2",
     "Controles de identidad": "https://datos.gob.cl/api/3/action/datastore_search?resource_id=69b8c48b-1d64-4296-8275-f3d2abfe1f0e",
@@ -19,28 +19,27 @@ API_DATASETS: Dict[str, str] = {
     "Personas detenidas": "https://datos.gob.cl/api/3/action/datastore_search?resource_id=9afe42af-034f-4859-a479-c3b25eed49b9"
 }
 
-DATA_FOLDER = "data"
 MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"]
 
-# ---------- Helpers ----------
-def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
-    buf = BytesIO()
-    df.to_csv(buf, index=False)
-    buf.seek(0)
-    return buf.getvalue()
-
+# ----------------------------
+# HELPERS
+# ----------------------------
 @st.cache_data(show_spinner=False)
 def fetch_api_all_records(base_url: str, page_limit: int = 1000) -> pd.DataFrame:
-    """Paginación segura para CKAN/datastore_search (datos.gob.cl)."""
+    """
+    Descarga todos los registros de una API CKAN/datastore_search usando paginación.
+    Devuelve DataFrame (puede ser vacío).
+    """
+    records = []
+    offset = 0
+    params = {"limit": page_limit, "offset": offset}
     try:
-        records = []
-        offset = 0
         while True:
-            params = {"limit": page_limit, "offset": offset}
-            resp = requests.get(base_url, params=params, timeout=20)
+            params["offset"] = offset
+            resp = requests.get(base_url, params=params, timeout=30)
             resp.raise_for_status()
-            j = resp.json()
-            batch = j.get("result", {}).get("records", [])
+            data = resp.json()
+            batch = data.get("result", {}).get("records", [])
             if not batch:
                 break
             records.extend(batch)
@@ -49,213 +48,280 @@ def fetch_api_all_records(base_url: str, page_limit: int = 1000) -> pd.DataFrame
                 break
         return pd.DataFrame(records)
     except Exception as e:
-        st.error(f"Error al descargar desde API: {e}")
+        st.error(f"Error al descargar datos desde la API: {e}")
         return pd.DataFrame()
 
-@st.cache_data
-def load_csv_local(path: str) -> pd.DataFrame:
-    try:
-        return pd.read_csv(path, encoding="utf-8", low_memory=False)
-    except Exception:
-        return pd.read_csv(path, encoding="latin-1", low_memory=False)
-
-def listar_csvs(folder: str = DATA_FOLDER) -> List[str]:
-    if not os.path.exists(folder):
-        return []
-    return sorted([f for f in os.listdir(folder) if f.lower().endswith(".csv")])
-
-def normalizar_cols(df: pd.DataFrame) -> pd.DataFrame:
+def normalize_col_names(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
     return df
 
-def detect_month_columns(cols: List[str]) -> List[str]:
-    cols_l = [c.lower() for c in cols]
-    meses = [c for c in cols if any(m in c.lower() for m in MESES)]
-    return meses
+def to_numeric_if_possible(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
+    df = df.copy()
+    for c in cols:
+        try:
+            df[c] = pd.to_numeric(df[c].astype(str).str.replace(",", "").str.replace(".", ""), errors="coerce").fillna(0)
+        except Exception:
+            pass
+    return df
 
-# ---------- Sidebar: elegir fuente ----------
-st.sidebar.header("Fuente de datos")
-fuente = st.sidebar.radio("Origen:", ("API (datos.gob.cl)", "CSV local (carpeta /data)"))
+def wide_to_long_if_needed(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Detecta si df tiene filas = delitos y columnas = regiones (ej: columna 'delitos_segun_agrupacion_por_modernizacion'
+    y varias columnas region_*). Si es así, convierte a formato largo con columnas: delito, region, cantidad
+    Si ya está en formato largo intenta mapear a esas columnas y devolver DataFrame con esas columnas.
+    """
+    df0 = df.copy()
+    df0 = normalize_col_names(df0)
 
-df_raw = pd.DataFrame()
-dataset_name = None
+    # heurística: si existe columna de delitos agrupados y varias columnas que empiezan con 'region' o 'region_de'
+    crime_col_candidates = [c for c in df0.columns if "delitos" in c or "delito" in c or "delitos_segun" in c]
+    region_cols = [c for c in df0.columns if c.startswith("region_") or c.startswith("reg_") or c.startswith("region")]
+    # also allow columns that look like region names (e.g., 'region_metropolitana_de_santiago')
+    region_like = [c for c in df0.columns if any(p in c for p in ["metropolitana","valparaiso","araucania","biobio","antofagasta","tarapaca","los_lagos","los_rios","magallanes","atan"])]
+    if region_like and not region_cols:
+        region_cols = region_like
 
-if fuente == "API (datos.gob.cl)":
-    st.sidebar.info("Selecciona un dataset (datos.gob.cl).")
-    dataset_name = st.sidebar.selectbox("Dataset (API)", list(API_DATASETS.keys()))
-    if dataset_name:
-        url = API_DATASETS[dataset_name]
-        with st.spinner("Descargando datos desde la API..."):
-            df_raw = fetch_api_all_records(url)
-else:
-    st.sidebar.info("Selecciona un CSV subido a /data/")
-    archivos = listar_csvs()
-    if not archivos:
-        st.sidebar.warning("No hay archivos CSV en /data/. Súbelos y refresca.")
-    else:
-        archivo_sel = st.sidebar.selectbox("CSV local", archivos)
-        if archivo_sel:
-            dataset_name = archivo_sel
-            ruta = os.path.join(DATA_FOLDER, archivo_sel)
-            df_raw = load_csv_local(ruta)
+    if crime_col_candidates and region_cols:
+        # assume wide format
+        crime_col = crime_col_candidates[0]
+        # prepare melt
+        try:
+            df_long = df0.melt(id_vars=[crime_col], value_vars=region_cols, var_name="region", value_name="cantidad")
+            # clean region names
+            df_long["region"] = df_long["region"].astype(str).str.replace("region_de_", "", regex=False).str.replace("region_", "", regex=False)
+            df_long["region"] = df_long["region"].str.replace("_", " ").str.strip()
+            df_long = df_long.rename(columns={crime_col: "delito"})
+            df_long["cantidad"] = pd.to_numeric(df_long["cantidad"], errors="coerce").fillna(0)
+            return df_long[["delito","region","cantidad"]]
+        except Exception:
+            pass
 
-# ---------- Validación ----------
-if df_raw is None or df_raw.empty:
-    st.warning("No se han cargado datos desde la fuente seleccionada. Revisa la barra lateral.")
+    # else, try to find columns that map to delito, region, cantidad directly
+    possible_delito = None
+    for c in df0.columns:
+        if "delit" in c or "agrup" in c or "tipo" in c or "delito" in c:
+            possible_delito = c
+            break
+    possible_region = None
+    for c in df0.columns:
+        if "region" in c or "comuna" in c or "provincia" in c:
+            possible_region = c
+            break
+    possible_cantidad = None
+    for c in df0.columns:
+        if c in ["cantidad","total","num","valor","total_general","total_general"]:
+            possible_cantidad = c
+            break
+    # fallback: numeric column with many values -> cantidad
+    if possible_cantidad is None:
+        numeric_cols = df0.select_dtypes(include="number").columns.tolist()
+        if numeric_cols:
+            possible_cantidad = numeric_cols[0]
+
+    if possible_delito and possible_region and possible_cantidad:
+        df_long = df0.rename(columns={
+            possible_delito: "delito",
+            possible_region: "region",
+            possible_cantidad: "cantidad"
+        })[["delito","region","cantidad"]]
+        df_long["cantidad"] = pd.to_numeric(df_long["cantidad"], errors="coerce").fillna(0)
+        return df_long
+
+    # as last resort, try to pivot any month columns into long (month detection)
+    meses = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"]
+    month_cols = [c for c in df0.columns if any(m in c for m in meses)]
+    if month_cols:
+        id_vars = [c for c in df0.columns if c not in month_cols]
+        # choose a plausible delito column
+        delito_col = None
+        for c in id_vars:
+            if "delito" in c or "tipo" in c or "agrup" in c:
+                delito_col = c
+                break
+        if delito_col is None and id_vars:
+            delito_col = id_vars[0]
+        df_long = df0.melt(id_vars=[delito_col], value_vars=month_cols, var_name="mes", value_name="cantidad")
+        df_long = df_long.rename(columns={delito_col: "delito"})
+        df_long["mes"] = df_long["mes"].astype(str).str.strip().str.lower()
+        df_long["cantidad"] = pd.to_numeric(df_long["cantidad"], errors="coerce").fillna(0)
+        # region unknown in this case - keep delito, mes, cantidad
+        return df_long[["delito","mes","cantidad"]]
+
+    # if nothing pudo detectarse, devolver df con columnas originales pero normalizadas
+    return df0
+
+def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
+    buf = BytesIO()
+    df.to_csv(buf, index=False)
+    buf.seek(0)
+    return buf.getvalue()
+
+# ----------------------------
+# SIDEBAR: selección dataset y opciones
+# ----------------------------
+st.sidebar.header("📁 Dataset (API)")
+dataset_choice = st.sidebar.selectbox("Elegir dataset", list(API_DATASETS.keys()))
+
+st.sidebar.markdown("**Opciones de visualización**")
+top_n = st.sidebar.slider("Mostrar top N delitos", min_value=5, max_value=30, value=10)
+show_treemap = st.sidebar.checkbox("Mostrar treemap", value=True)
+show_heatmap = st.sidebar.checkbox("Mostrar heatmap (región vs delito)", value=True)
+show_timeseries = st.sidebar.checkbox("Mostrar serie temporal (si hay año)", value=True)
+
+# ----------------------------
+# Descarga datos desde API
+# ----------------------------
+with st.spinner("Descargando datos (puede tardar unos segundos)..."):
+    url = API_DATASETS[dataset_choice]
+    raw_df = fetch_api_all_records(url, page_limit=1000)
+
+if raw_df.empty:
+    st.error("La API devolvió un dataset vacío o hubo un error. Revisa la conexión o intenta otro dataset.")
     st.stop()
 
-# ---------- Limpieza básica ----------
-# eliminar columna de índice si existe (Unnamed: 0)
-if "unnamed: 0" in [c.lower() for c in df_raw.columns]:
-    df_raw = df_raw.loc[:, [c for c in df_raw.columns if c.lower() != "unnamed: 0"]]
+# Normalizar
+raw_df = normalize_col_names(raw_df)
 
-df = normalizar_cols(df_raw)
-df = df.fillna(0)
+# Convertir wide->long o normalizar a df_long
+df_long = wide_to_long_if_needed(raw_df)
 
-# Si la tabla viene como filas = delitos, columnas = regiones (como tu CSV), transformamos a largo
-# Buscamos columna que contenga el texto 'delito' / 'delitos' / 'delitos_segun' u otras heurísticas
-possible_del_cols = [c for c in df.columns if any(k in c for k in ["delito", "delitos", "agrupacion", "descripcion"])]
-del_col = possible_del_cols[0] if possible_del_cols else None
+# Estándar: si df_long tiene 'mes' en lugar de 'region', mantenemos esa info
+has_region = "region" in df_long.columns
+has_mes = "mes" in df_long.columns
 
-# Si no detectamos, intentar detectar por posición: primera columna no-numérica con varios únicos pero < 500
-if del_col is None:
-    for c in df.columns:
-        if df[c].dtype == object and c != "_id":
-            nunq = df[c].nunique()
-            if 1 < nunq < 500:
-                del_col = c
-                break
+# Asegurar columnas esperadas
+if "delito" not in df_long.columns:
+    # renombrar primera columna a 'delito' si no existe
+    df_long = df_long.rename(columns={df_long.columns[0]: "delito"})
 
-# detectamos columnas mes/región (numéricas)
-month_cols = detect_month_columns(df.columns)
-# también detectar columnas numéricas diferentes (regiones)
-numeric_candidate_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c]) and c not in [del_col, "total_general", "_id"]]
+if "cantidad" not in df_long.columns and "valor" in df_long.columns:
+    df_long = df_long.rename(columns={"valor": "cantidad"})
 
-# Decisión: si hay del_col y numeric_candidate_cols -> crear df_long por melt (filas: delito-region-cantidad)
-df_long = pd.DataFrame()
-if del_col and numeric_candidate_cols:
-    id_vars = [del_col]
-    value_vars = numeric_candidate_cols
-    df_long = df.melt(id_vars=id_vars, value_vars=value_vars, var_name="region", value_name="cantidad")
-    # limpiar nombres region
-    df_long["region"] = df_long["region"].astype(str).str.replace("region_de_", "", regex=False).str.replace("_", " ").str.strip()
-    df_long["delito"] = df_long[del_col].astype(str).str.strip()
-    df_long["cantidad"] = pd.to_numeric(df_long["cantidad"], errors="coerce").fillna(0).astype(int)
+# llenar nulos y convertir cantidad a numérico
+if "cantidad" in df_long.columns:
+    df_long["cantidad"] = pd.to_numeric(df_long["cantidad"], errors="coerce").fillna(0)
 else:
-    # fallback: si ya está en formato largo (tiene columnas 'delito' y 'region' y 'cantidad')
-    if set(["delito","region","cantidad"]).issubset(set(df.columns)):
-        df_long = df[["delito","region","cantidad"]].copy()
-        df_long["cantidad"] = pd.to_numeric(df_long["cantidad"], errors="coerce").fillna(0).astype(int)
-    else:
-        # si no podemos resolver, convertimos lo posible: todas las columnas numéricas sumadas a una columna 'total'
-        if df.select_dtypes(include="number").shape[1] > 0:
-            numeric_cols = df.select_dtypes(include="number").columns.tolist()
-            agg = pd.DataFrame(df[numeric_cols].sum()).reset_index()
-            agg.columns = ["region_or_col","cantidad"]
-            agg["delito"] = "total_agrupado"
-            df_long = agg[["delito","region_or_col","cantidad"]].rename(columns={"region_or_col":"region"})
-        else:
-            st.error("No fue posible inferir formato (ni filas-delito ni formato largo). Revisa tu CSV o selecciona otro dataset.")
-            st.stop()
+    # si no hay columna 'cantidad', crear con 1 para conteo
+    df_long["cantidad"] = 1
 
-# Ahora df_long tiene: delito, region, cantidad
-# Normalizar texto
-df_long["region"] = df_long["region"].astype(str).str.lower()
+# Normalizar strings
 df_long["delito"] = df_long["delito"].astype(str).str.strip()
+if has_region:
+    df_long["region"] = df_long["region"].astype(str).str.strip()
 
-# ----------------- INTERFAZ PRINCIPAL (más visual y menos texto) -----------------
-st.markdown("### Visualizaciones interactivas")
-col1, col2 = st.columns([2,1])
+# Mostrar info breve
+st.sidebar.success(f"Registros: {len(raw_df)} → filas transformadas: {len(df_long)}")
 
-with col2:
-    st.subheader("Controles")
-    top_n = st.number_input("Top N delitos (ranking)", min_value=3, max_value=50, value=8, step=1)
-    region_filter = st.selectbox("Filtrar por región (opcional)", ["Todas"] + sorted(df_long["region"].unique().tolist()))
-    delito_filter = st.selectbox("Filtrar por delito (opcional)", ["Todos"] + sorted(df_long["delito"].unique().tolist()))
-    compact_mode = st.checkbox("Mostrar menos textos/expander", value=True)
-    download_source = st.selectbox("Descargar datos de:", ["Tabla larga (delito-region)","Resultados filtrados"])
+# ----------------------------
+# FILTROS principales en UI
+# ----------------------------
+st.header("🔎 Exploración y filtros (trabajamos solo con API)")
 
-with col1:
-    # Top N delitos (suma total)
-    st.subheader(f"🏆 Top {top_n} delitos (suma total)")
-    df_top = df_long.groupby("delito", as_index=False)["cantidad"].sum().sort_values("cantidad", ascending=False)
-    if delito_filter != "Todos":
-        # si hay un filtro por delito, limitar (mantener orden)
-        df_top = df_top[df_top["delito"] == delito_filter]
-    fig_top = px.bar(df_top.head(top_n), x="cantidad", y="delito", orientation="h",
-                     title=f"Top {top_n} delitos", labels={"cantidad":"Total","delito":"Delito"})
-    st.plotly_chart(fig_top, use_container_width=True)
-
-# Aplicar filtros a df_long
-df_filtered = df_long.copy()
-if region_filter != "Todas":
-    df_filtered = df_filtered[df_filtered["region"] == region_filter]
-if delito_filter != "Todos":
-    df_filtered = df_filtered[df_filtered["delito"] == delito_filter]
-
-# Serie por región / mes (si 'mes' existe en tu df o si month_cols detectados)
-st.markdown("### Series por categoría / región")
-if "mes" in df_filtered.columns or any(m in c for m in MESES for c in df.columns):
-    # Si existe df with mes column (rare), o user wants months, attempt to build monthly series
-    # We'll attempt to detect month-named columns in the original df and pivot if present
-    meses_found = [c for c in df.columns if any(m in c for m in MESES)]
-    if meses_found:
-        # Si original tiene columnas por mes, hacer melt específico
-        base_id_vars = [c for c in df.columns if c not in meses_found]
-        df_meses = df.melt(id_vars=base_id_vars, value_vars=meses_found, var_name="mes", value_name="valor")
-        # Si col del nombre del delito cambió en normalizar, ubicarlo
-        delito_col_name = del_col if del_col else base_id_vars[0] if base_id_vars else None
-        if delito_col_name:
-            df_meses["delito"] = df_meses[delito_col_name].astype(str).str.strip()
-            df_meses["mes"] = df_meses["mes"].astype(str).str.lower()
-            df_meses["valor"] = pd.to_numeric(df_meses["valor"], errors="coerce").fillna(0).astype(int)
-            # aplicar filtros
-            tmp = df_meses.copy()
-            if region_filter != "Todas" and "region" in tmp.columns:
-                tmp = tmp[tmp["region"]==region_filter]
-            if delito_filter != "Todos":
-                tmp = tmp[tmp["delito"]==delito_filter]
-            # agrupar por mes
-            series = tmp.groupby("mes")["valor"].sum().reindex(MESES).fillna(0).reset_index()
-            fig = px.line(series, x="mes", y="valor", title="Serie por mes (valores agrupados)")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No se pudo identificar columna de delito para la transformación por meses.")
+# Filtro por región (si existe)
+region_sel: Optional[str] = None
+if has_region:
+    regiones = sorted(df_long["region"].unique().astype(str).tolist())
+    regiones = ["Todos"] + regiones
+    region_sel = st.selectbox("Filtrar por región", regiones, index=0)
+    if region_sel != "Todos":
+        df_vis = df_long[df_long["region"] == region_sel].copy()
     else:
-        # Si no hay meses, mostrar serie por region (si hay varias regiones)
-        if df_filtered["region"].nunique() > 1:
-            series = df_filtered.groupby("region")["cantidad"].sum().reset_index().sort_values("cantidad", ascending=False)
-            fig = px.bar(series.head(30), x="region", y="cantidad", title="Totales por región (top)", labels={"cantidad":"Total","region":"Región"})
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No hay datos por mes detectados; mostrando totales por región o por delito arriba.")
+        df_vis = df_long.copy()
 else:
-    # Sin meses detectados: mostrar totales por región o por delito
-    if df_filtered["region"].nunique() > 1:
-        series = df_filtered.groupby("region")["cantidad"].sum().reset_index().sort_values("cantidad", ascending=False)
-        fig = px.bar(series.head(30), x="region", y="cantidad", title="Totales por región (top)", labels={"cantidad":"Total","region":"Región"})
-        st.plotly_chart(fig, use_container_width=True)
+    df_vis = df_long.copy()
+
+# Filtro por delito (multi)
+delitos_disponibles = sorted(df_vis["delito"].unique().astype(str).tolist())
+delitos_sel = st.multiselect("Seleccionar delito(s) (dejar vacío = todos)", delitos_disponibles, default=[])
+
+if delitos_sel:
+    df_vis = df_vis[df_vis["delito"].isin(delitos_sel)]
+
+# Filtrar por mes si aplica
+if has_mes:
+    meses_disponibles = sorted(df_vis["mes"].unique().astype(str).tolist(), key=lambda x: MESES.index(x) if x in MESES else 999)
+    mes_sel = st.selectbox("Filtrar por mes", ["Todos"] + meses_disponibles, index=0)
+    if mes_sel != "Todos":
+        df_vis = df_vis[df_vis["mes"] == mes_sel]
+
+# Mostrar tabla resumida y descarga
+st.subheader("Tabla (previsualización)")
+st.write(f"Filas mostradas: {len(df_vis)}")
+st.dataframe(df_vis.head(200))
+
+csv_bytes = df_to_csv_bytes(df_vis)
+st.download_button("⬇️ Descargar CSV (filtrado)", data=csv_bytes, file_name=f"{dataset_choice}_filtrado.csv", mime="text/csv")
+
+# ----------------------------
+# Top N delitos (barra)
+# ----------------------------
+st.header(f"🏆 Top {top_n} — Delitos más frecuentes (suma cantidad)")
+
+try:
+    top = df_vis.groupby("delito")["cantidad"].sum().sort_values(ascending=False).head(top_n).reset_index()
+    if not top.empty:
+        fig_bar = px.bar(top, x="delito", y="cantidad", title=f"Top {top_n} delitos", labels={"cantidad":"Total"}, text="cantidad")
+        fig_bar.update_layout(xaxis_tickangle=-45, margin={"t":50,"b":150})
+        st.plotly_chart(fig_bar, use_container_width=True)
     else:
-        st.info("No se detectaron series por mes ni múltiples regiones en los datos filtrados.")
+        st.info("No hay datos para mostrar en el Top.")
+except Exception as e:
+    st.error(f"Error generando Top N: {e}")
 
+# ----------------------------
 # Treemap creativo
-st.markdown("### 🌳 Treemap — Distribución por delito")
-treemap_df = df_long.groupby("delito", as_index=False)["cantidad"].sum().sort_values("cantidad", ascending=False).head(100)
-fig_tree = px.treemap(treemap_df, path=["delito"], values="cantidad", title="Treemap — Top delitos")
-st.plotly_chart(fig_tree, use_container_width=True)
+# ----------------------------
+if show_treemap:
+    st.header("🌳 Treemap — Distribución por delito")
+    try:
+        treemap_df = df_vis.groupby("delito")["cantidad"].sum().reset_index().sort_values("cantidad", ascending=False).head(200)
+        if not treemap_df.empty:
+            fig_t = px.treemap(treemap_df, path=["delito"], values="cantidad", title="Treemap — Delitos (Top)")
+            st.plotly_chart(fig_t, use_container_width=True)
+        else:
+            st.info("No hay datos para el treemap.")
+    except Exception as e:
+        st.error(f"Error en treemap: {e}")
 
-# Tabla filtrada y descarga
-st.markdown("### 🔎 Tabla filtrada")
-st.write(f"Registros: {len(df_filtered)}")
-st.dataframe(df_filtered.head(300))
+# ----------------------------
+# Heatmap region vs delito (si hay region)
+# ----------------------------
+if show_heatmap and has_region:
+    st.header("🔥 Heatmap — Región vs Delito")
+    try:
+        pivot = df_vis.pivot_table(index="delito", columns="region", values="cantidad", aggfunc="sum", fill_value=0)
+        if pivot.shape[0] == 0 or pivot.shape[1] == 0:
+            st.info("No hay suficiente información para generar heatmap.")
+        else:
+            # limitar a top delitos to keep heatmap readable
+            top_delitos_for_heat = pivot.sum(axis=1).sort_values(ascending=False).head(30).index.tolist()
+            pivot_small = pivot.loc[top_delitos_for_heat]
+            fig_h = px.imshow(pivot_small, labels=dict(x="Región", y="Delito", color="Cantidad"), aspect="auto", title="Heatmap: Regiones vs Delitos (Top 30 delitos)")
+            st.plotly_chart(fig_h, use_container_width=True)
+    except Exception as e:
+        st.error(f"Error generando heatmap: {e}")
 
-csv_choice = df_to_csv_bytes(df_filtered if download_source=="Resultados filtrados" else df_long)
-st.download_button("⬇️ Descargar CSV seleccionado", data=csv_choice, file_name=f"{(dataset_name or 'dataset')}_export.csv", mime="text/csv")
+# ----------------------------
+# Serie temporal si existe columna año
+# ----------------------------
+possible_year_cols = [c for c in raw_df.columns if "anio" in c or "año" in c or "year" in c]
+if show_timeseries and possible_year_cols:
+    st.header("📈 Serie temporal (por año)")
+    try:
+        # preferimos columna 'anio' detectada en df_vis, si no está en df_vis intentamos tomar de raw_df
+        ycol = possible_year_cols[0]
+        # si está en df_vis usarlo; sino intentar juntar raw_df mapped
+        if ycol in df_vis.columns:
+            df_times = df_vis.copy()
+            df_times[ycol] = pd.to_numeric(df_times[ycol], errors="coerce").fillna(0).astype(int)
+            times = df_times.groupby(ycol)["cantidad"].sum().reset_index()
+            fig_ts = px.line(times, x=ycol, y="cantidad", title="Serie temporal (total cantidad por año)", markers=True)
+            st.plotly_chart(fig_ts, use_container_width=True)
+        else:
+            st.info(f"No se detectó columna de año usable en la tabla transformada (buscando {ycol}).")
+    except Exception as e:
+        st.error(f"Error generando serie temporal: {e}")
 
-# Mensaje final pequeño (para cumplir con claridad)
-if not compact_mode:
-    st.markdown("---")
-    st.info("Interactividad: filtra por región o delito en la columna de la derecha. Si los datos vienen por meses (enero...diciembre) activa el pivot en la versión anterior para series mensuales.")
-
-
+st.markdown("---")
+st.caption("Interfaz diseñada para trabajar SOLO con APIs (datos.gob.cl). Si quieres añadir/editar algún gráfico (mapa, barras apiladas, comparador entre regiones), dime cuál y lo agrego.")
