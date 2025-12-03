@@ -115,6 +115,43 @@ def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
     buf.seek(0)
     return buf.getvalue()
 
+# ----------------------
+# RANKING DE DELITOS (TOP N)
+# ----------------------
+import plotly.express as px
+
+st.header("🏆 Ranking — Delitos más frecuentes")
+
+# Verificamos que existan las columnas necesarias
+if "delitos_segun_agrupacion_por_modernizacion" in df.columns and "total_general" in df.columns:
+    
+    # Preparamos el DataFrame
+    ranking_df = df[["delitos_segun_agrupacion_por_modernizacion", "total_general"]].copy()
+    ranking_df.columns = ["delito", "valor"]
+
+    # Ordenar de mayor a menor
+    ranking_df = ranking_df.sort_values(by="valor", ascending=False)
+
+    # Selector TOP N
+    top_n = st.slider("Selecciona cuántos delitos mostrar", 3, len(ranking_df), 5)
+
+    top_df = ranking_df.head(top_n)
+
+    # Gráfico
+    fig = px.bar(
+        top_df,
+        x="delito",
+        y="valor",
+        title=f"Top {top_n} delitos según total general",
+        labels={"delito": "Delito", "valor": "Total"},
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+else:
+    st.warning("No se encontraron columnas válidas para generar el ranking.")
+
+
 # ----------------------------
 # UI: barra lateral - fuente de datos
 # ----------------------------
