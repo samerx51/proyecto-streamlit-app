@@ -122,6 +122,43 @@ for c in df.columns:
         n_nums = sample.str.replace(",", "").str.replace("-", "").str.isnumeric().sum()
         if n_nums >= 3:
             df[c] = pd.to_numeric(df[c].astype(str).str.replace(",", ""), errors='coerce').fillna(0)
+# ============================
+# 🔄 TRANSFORMACIÓN A FORMATO LARGO
+# ============================
+
+# 1. Identificar columnas de delitos (todas excepto _id y total_general)
+columnas_delitos = [
+    c for c in df.columns 
+    if c not in ["_id", "total_general", "delitos_segun_agrupacion_por_modernizacion"]
+]
+
+# 2. Renombrar columna de delitos para claridad
+df = df.rename(columns={"delitos_segun_agrupacion_por_modernizacion": "delito"})
+
+# 3. Hacer melt (convertir a formato largo)
+df_long = df.melt(
+    id_vars=["delito"], 
+    value_vars=columnas_delitos,
+    var_name="region",
+    value_name="cantidad"
+)
+
+# 4. Limpiar la región: quitar "region_de_" y reemplazar guiones
+df_long["region"] = (
+    df_long["region"]
+    .str.replace("region_de_", "", regex=False)
+    .str.replace("_", " ")
+    .str.capitalize()
+)
+
+# 5. Ordenar para lectura
+df_long = df_long.sort_values(["delito", "region"]).reset_index(drop=True)
+
+st.subheader("📌 Datos transformados a formato largo (delito – región – cantidad)")
+st.dataframe(df_long.head(50))
+
+# df_long es el que usarás desde ahora para graficar y filtrar
+
 
 # ----------------------------
 # EXPLORACIÓN INICIAL (minimizada, porque quieres menos texto)
