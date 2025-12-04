@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 import plotly.express as px
 
 st.set_page_config(page_title="Estadísticas Policiales Chile (API)", layout="wide")
-st.title("📊 Estadísticas Policiales en Chile — PDI & datos.gob.cl")
+st.title("Estadísticas Policiales en Chile — PDI & datos.gob.cl")
 
 # ----------------------------
 # CONFIG: APIs
@@ -324,4 +324,3 @@ if show_timeseries and possible_year_cols:
         st.error(f"Error generando serie temporal: {e}")
 
 st.markdown("---")
-st.caption("Interfaz diseñada para trabajar SOLO con APIs (datos.gob.cl). Si quieres añadir/editar algún gráfico (mapa, barras apiladas, comparador entre regiones), dime cuál y lo agrego.")
